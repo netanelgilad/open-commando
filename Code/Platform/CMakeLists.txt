@@ -3,6 +3,7 @@
 file(GLOB REBEL_PLATFORM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/win32/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gfx/*.cpp
 )
 add_library(RebelPlatform STATIC ${REBEL_PLATFORM_SOURCES})
 target_include_directories(RebelPlatform
@@ -12,6 +13,7 @@ target_include_directories(RebelPlatform
         ${PROJECT_SOURCE_DIR}/Code/wwlib
         ${PROJECT_SOURCE_DIR}/Code/wwdebug
         ${PROJECT_SOURCE_DIR}/Code/third_party/minimp3
+        ${PROJECT_SOURCE_DIR}/Code/third_party/stb
 )
 # Emscripten's OpenAL is implemented on Web Audio.
 target_link_options(RebelPlatform INTERFACE -lopenal)

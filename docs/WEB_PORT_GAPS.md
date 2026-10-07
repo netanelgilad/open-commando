@@ -15,6 +15,17 @@ where the shortcut lives and what "done" looks like.
   loop the whole file.
 - **Stereo samples can't be panned** (OpenAL limitation); only mono pans.
 
+## Graphics / text
+
+- **Italic fonts aren't synthesized.** GDI text runs on stb_truetype
+  (`Code/Platform/gfx/gdi_text.cpp`); bold is emulated by 1px widening,
+  italic requests render upright. The shipped fonts (Arial MT, Regatta
+  Condensed LET) have no italic files.
+- **Gamma ramp** (`SetDeviceGammaRamp` / `IDirect3DDevice9::SetGammaRamp`)
+  must be applied in the present pass; until then the brightness slider
+  does nothing.
+- **Frame grabber** (AVI movie capture, developer tool) is inert.
+
 ## Networking
 
 - **Westwood Online / GameSpy** code paths are excluded (`connect.cpp`,

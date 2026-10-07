@@ -1192,3 +1192,5 @@ BOOL UnmapViewOfFile(LPCVOID p);
 #endif
 
 #include "mmsystem.h"
+
+#include "wingdi.h"

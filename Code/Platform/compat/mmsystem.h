@@ -25,3 +25,11 @@ typedef struct tWAVEFORMATEX {
 } WAVEFORMATEX, *LPWAVEFORMATEX;
 DECLARE_HANDLE(HWAVEOUT);
 typedef HWAVEOUT *LPHWAVEOUT;
+
+typedef UINT MMRESULT;
+#define TIMERR_NOERROR 0
+#define TIMERR_NOCANDO 97
+#ifndef MAKEFOURCC
+#define MAKEFOURCC(a, b, c, d) ((DWORD)(BYTE)(a) | ((DWORD)(BYTE)(b) << 8) | ((DWORD)(BYTE)(c) << 16) | ((DWORD)(BYTE)(d) << 24))
+#endif
+#define mmioFOURCC MAKEFOURCC

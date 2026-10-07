@@ -76,6 +76,8 @@ private:
   static bool TextureLoadSuspended;
 };
 
+class TextureLoadTaskListClass; // friend alone does not declare it outside MSVC
+
 class TextureLoadTaskListNodeClass {
   friend class TextureLoadTaskListClass;
 

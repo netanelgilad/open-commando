@@ -61,6 +61,12 @@ public:
   //	Public constructors/destructors
   ////////////////////////////////////////////////////////////
   WideStringClass(size_t initial_len = 0, bool hint_temporary = false);
+#ifdef REBEL_PORTABLE
+  // See StringClass: keep MSVC's resolution of WideStringClass(0u, true).
+  WideStringClass(unsigned int initial_len, bool hint_temporary = false)
+      : WideStringClass((size_t)initial_len, hint_temporary) {}
+  WideStringClass(int initial_len, bool hint_temporary = false) : WideStringClass((size_t)initial_len, hint_temporary) {}
+#endif
   WideStringClass(const WideStringClass &string, bool hint_temporary = false);
   WideStringClass(const WCHAR *string, bool hint_temporary = false);
   WideStringClass(WCHAR ch, bool hint_temporary = false);

@@ -450,20 +450,10 @@ extern "C" HDC BeginPaint(HWND, LPPAINTSTRUCT ps) {
   return (HDC)1;
 }
 extern "C" BOOL EndPaint(HWND, const PAINTSTRUCT *) { return TRUE; }
-extern "C" HDC GetDC(HWND) { return (HDC)1; }
-extern "C" int ReleaseDC(HWND, HDC) { return 1; }
 extern "C" HGDIOBJ GetStockObject(int) { return (HGDIOBJ)1; }
-extern "C" BOOL DeleteObject(HGDIOBJ) { return TRUE; }
-extern "C" HGDIOBJ SelectObject(HDC, HGDIOBJ o) { return o; }
-extern "C" int GetDeviceCaps(HDC, int idx) {
-  switch (idx) {
-  case HORZRES: return ScreenW;
-  case VERTRES: return ScreenH;
-  case BITSPIXEL: return 32;
-  case VREFRESH: return 60;
-  default: return 0;
-  }
-}
+extern "C" int Rebel_Screen_Width(void) { return ScreenW; }
+extern "C" int Rebel_Screen_Height(void) { return ScreenH; }
+// GetDC/SelectObject/DeleteObject/GetDeviceCaps live in gfx/gdi_text.cpp.
 extern "C" BOOL MessageBeep(UINT) { return TRUE; }
 extern "C" BOOL FlashWindow(HWND, BOOL) { return TRUE; }
 
