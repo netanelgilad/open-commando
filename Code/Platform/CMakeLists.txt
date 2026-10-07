@@ -11,3 +11,14 @@ target_include_directories(RebelPlatform
         ${PROJECT_SOURCE_DIR}/Code/wwlib
         ${PROJECT_SOURCE_DIR}/Code/wwdebug
 )
+
+# Route every libc path entry point through Rebel_Resolve_Path (path_resolve.cpp).
+set(REBEL_WRAPPED_PATH_FUNCS fopen freopen open stat lstat access opendir mkdir rmdir unlink remove rename chdir truncate)
+foreach(_fn ${REBEL_WRAPPED_PATH_FUNCS})
+    target_link_options(RebelPlatform INTERFACE "LINKER:--wrap=${_fn}")
+endforeach()
+
+# Node-run smoke tests against a real Renegade install (REBEL_GAME_DIR).
+add_executable(rebel_mix_smoke tests/mix_smoke.cpp)
+target_link_libraries(rebel_mix_smoke PRIVATE WWLib WWDebug RebelPlatform)
+target_link_options(rebel_mix_smoke PRIVATE -lnodefs.js -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1 -sENVIRONMENT=node,worker)

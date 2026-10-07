@@ -97,8 +97,6 @@ char *_i64toa(long long value, char *buf, int radix);
 void _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext);
 void _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext);
 char *_fullpath(char *abs, const char *rel, size_t max);
-unsigned int _rotl(unsigned int v, int s);
-unsigned int _rotr(unsigned int v, int s);
 #ifdef __cplusplus
 }
 #endif

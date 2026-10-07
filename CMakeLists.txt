@@ -24,8 +24,8 @@ if(REBEL_PORTABLE)
     # Replacement Win32 / D3D / Miles / Bink headers live here; backends in Code/Platform
     include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/Code/Platform/compat")
     add_compile_definitions(REBEL_PORTABLE)
-    add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/rebel_portable.h" -fwasm-exceptions)
-    add_link_options(-fwasm-exceptions)
+    add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/rebel_portable.h" -fwasm-exceptions -pthread)
+    add_link_options(-fwasm-exceptions -pthread)
     add_compile_options(-Wno-everything -fms-extensions -fno-delayed-template-parsing)
     # Windows system / proprietary SDK libraries become empty targets; the
     # replacements are compiled into RebelPlatform instead.

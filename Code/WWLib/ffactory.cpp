@@ -120,7 +120,11 @@ void SimpleFileFactoryClass::Append_Sub_Directory(const std::filesystem::path& s
 **
 */
 FileClass *SimpleFileFactoryClass::Get_File(char const *filename) {
-  std::filesystem::path new_name;
+  // Default to the name as given (EA's original behaviour); the search path
+  // below only overrides it for relative names. Rebel's std::filesystem
+  // conversion left this empty, which broke absolute paths and factories
+  // without a sub directory.
+  std::filesystem::path new_name(filename ? filename : "");
   RawFileClass *file = new BufferedFileClass(); // new RawWritingFileClass();
   assert(file);
 
