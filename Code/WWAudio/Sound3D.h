@@ -50,6 +50,7 @@
 //	A 3D sound should be added to the SoundScene rather than explicitly played.  The
 // SoundScene will determine when a 3D sound is 'in range' and play it...
 //
+class SoundSceneClass; // declared ahead of its friend use (MSVC-only lookup)
 class Sound3DClass : public AudibleSoundClass {
 public:
   //////////////////////////////////////////////////////////////////////

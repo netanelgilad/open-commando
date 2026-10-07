@@ -50,6 +50,7 @@ class AudibleSoundClass;
 /*
 ** CinematicGameObjDef - Defintion class for a CinematicGameObj
 */
+class CinematicGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class CinematicGameObjDef : public ArmedGameObjDef {
 public:
   CinematicGameObjDef(void);

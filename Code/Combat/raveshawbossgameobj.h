@@ -57,6 +57,7 @@ class SimpleGameObj;
 //	RaveshawBossGameObjDefClass
 //
 //////////////////////////////////////////////////////////////////////
+class RaveshawBossGameObjClass; // declared ahead of its friend use (MSVC-only lookup)
 class RaveshawBossGameObjDefClass : public SoldierGameObjDef {
 public:
   DECLARE_EDITABLE(RaveshawBossGameObjDefClass, SoldierGameObjDef);

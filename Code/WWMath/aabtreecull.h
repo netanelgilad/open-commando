@@ -57,6 +57,7 @@ class SphereClass;
 ** AABTreeCullSystemClass
 ** Derived culling system that uses an Axis-Aligned Bounding Box Tree
 */
+class AABTreeIterator; // declared ahead of its friend use (MSVC-only lookup)
 class AABTreeCullSystemClass : public CullSystemClass {
 public:
   AABTreeCullSystemClass();

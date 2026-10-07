@@ -98,6 +98,7 @@ enum {
 ** This class is an editable definition for a building.  It contains all constant data needed to initialize
 ** a BuildingGameObj.
 */
+class BuildingGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class BuildingGameObjDef : public DamageableGameObjDef {
 public:
   BuildingGameObjDef(void);
@@ -153,6 +154,7 @@ protected:
 **   all aggregates.
 **
 */
+class GameObjManager; // declared ahead of its friend use (MSVC-only lookup)
 class BuildingGameObj : public DamageableGameObj, public CombatPhysObserverClass {
 public:
   //	Constructor and Destructor

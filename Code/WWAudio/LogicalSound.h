@@ -46,6 +46,7 @@
 //	This class represents 'logical' sounds that affect gameplay but do not
 // actually make an audible sound
 //
+class SoundSceneClass; // declared ahead of its friend use (MSVC-only lookup)
 class LogicalSoundClass : public SoundSceneObjClass {
 public:
   //////////////////////////////////////////////////////////////////////

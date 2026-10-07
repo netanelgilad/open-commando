@@ -80,6 +80,8 @@ struct BoxRayAPTContextStruct;
 ** is in MeshGeometryClass.  I moved these out into a separate file just to reduce the
 ** size of meshmdl.cpp.
 */
+class AuxMeshDataClass; // declared ahead of its friend use (MSVC-only lookup)
+class AABTreeBuilderClass; // declared ahead of its friend use (MSVC-only lookup)
 class AABTreeClass : public RefCountClass {
 public:
   AABTreeClass(void);

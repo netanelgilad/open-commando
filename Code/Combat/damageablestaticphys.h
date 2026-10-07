@@ -50,6 +50,7 @@ class DamageableStaticPhysDefClass;
 ** This is a static physics object which tracks its health.  When the health drops to zero,
 ** it plays its animation and stops on the end frame.
 */
+class DSAPONetworkObjectClass; // declared ahead of its friend use (MSVC-only lookup)
 class DamageableStaticPhysClass : public StaticAnimPhysClass {
 public:
   //	Constructor and Destructor

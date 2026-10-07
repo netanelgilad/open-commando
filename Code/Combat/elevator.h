@@ -58,6 +58,7 @@ typedef enum { ZONE_LOWER_CALL = 0, ZONE_LOWER_INSIDE, ZONE_UPPER_CALL, ZONE_UPP
 /*
 ** ElevatorPhysDefClass
 */
+class ElevatorPhysClass; // declared ahead of its friend use (MSVC-only lookup)
 class ElevatorPhysDefClass : public AccessiblePhysDefClass {
 public:
   ElevatorPhysDefClass(void);
@@ -95,6 +96,7 @@ protected:
 /*
 ** ElevatorPhysClass
 */
+class ElevatorNetworkObjectClass; // declared ahead of its friend use (MSVC-only lookup)
 class ElevatorPhysClass : public AccessiblePhysClass {
 public:
   //	Constructor and Destructor

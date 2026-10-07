@@ -55,6 +55,7 @@ class ChunkLoadClass;
 //	SpecialEffectsGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class SpecialEffectsGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class SpecialEffectsGameObjDef : public PhysicalGameObjDef {
 public:
   DECLARE_EDITABLE(SpecialEffectsGameObjDef, PhysicalGameObjDef);

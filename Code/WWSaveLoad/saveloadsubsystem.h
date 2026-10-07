@@ -61,6 +61,7 @@ class ChunkSaveClass;
 // that data.
 //
 //////////////////////////////////////////////////////////////////////////////////
+class SaveLoadSystemClass; // declared ahead of its friend use (MSVC-only lookup)
 class SaveLoadSubSystemClass : public PostLoadableClass {
 public:
   SaveLoadSubSystemClass();

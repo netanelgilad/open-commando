@@ -54,6 +54,7 @@ class cPacket;
 //
 // Holds data about a team
 //
+class cTeamManager; // declared ahead of its friend use (MSVC-only lookup)
 class cTeam : public NetworkObjectClass {
 
 public:

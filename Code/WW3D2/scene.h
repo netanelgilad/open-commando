@@ -86,6 +86,7 @@ protected:
 ** each frame regardless of whether they are visible so they are registered
 ** for "ON_FRAME_UPDATE" processing.
 */
+class WW3D; // declared ahead of its friend use (MSVC-only lookup)
 class SceneClass : public RefCountClass {
 public:
   SceneClass(void);
@@ -193,6 +194,7 @@ private:
 ** render object add its internal (surrender) representation to the
 ** internal (surrender) representation of the scene.
 */
+class SimpleSceneIterator; // declared ahead of its friend use (MSVC-only lookup)
 class SimpleSceneClass : public SceneClass {
 public:
   SimpleSceneClass(void);

@@ -241,6 +241,7 @@ protected:
   enum { PAGE_COUNT = 4 };
 };
 
+class WeatherMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class WeatherParameterClass {
 public:
   void Initialize();

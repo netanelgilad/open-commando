@@ -1283,12 +1283,18 @@ template <class T> unsigned long DataSafeClass<T>::Get_Type_Code(void) {
   */
   static unsigned long instruction_pointer;
   instruction_pointer = 0;
+#ifdef REBEL_PORTABLE
+  // Same idea without code addresses: each instantiation owns a distinct static.
+  static char type_tag;
+  instruction_pointer = (unsigned long)(uintptr_t)&type_tag;
+#else
   __asm {
 here:
 		lea	eax,here
 		mov	[instruction_pointer],eax
   }
   ;
+#endif
 
   ds_assert(instruction_pointer != 0);
 

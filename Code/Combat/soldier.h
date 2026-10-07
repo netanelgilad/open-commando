@@ -79,6 +79,8 @@ typedef enum {
 /*
 ** SoldierGameObjDef - Defintion class for a SoldierGameObj
 */
+class SoldierGameObj; // declared ahead of its friend use (MSVC-only lookup)
+class SoldierObserverClass; // declared ahead of its friend use (MSVC-only lookup)
 class SoldierGameObjDef : public SmartGameObjDef {
 public:
   SoldierGameObjDef(void);

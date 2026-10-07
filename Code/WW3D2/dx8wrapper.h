@@ -177,6 +177,9 @@ struct RenderStateStruct {
 ** an WWINLINE function so that we can add stat tracking, etc if needed.  Direct access to the
 ** D3D device will require "friend" status and should be granted only in extreme circumstances :-)
 */
+class WW3D; // declared ahead of its friend use (MSVC-only lookup)
+class DX8IndexBufferClass; // declared ahead of its friend use (MSVC-only lookup)
+class DX8VertexBufferClass; // declared ahead of its friend use (MSVC-only lookup)
 class DX8Wrapper {
   enum ChangedStates {
     WORLD_CHANGED = 1 << 0,

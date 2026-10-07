@@ -62,6 +62,7 @@ enum {
 /*
 ** DoorPhysDefClass
 */
+class DoorPhysClass; // declared ahead of its friend use (MSVC-only lookup)
 class DoorPhysDefClass : public AccessiblePhysDefClass {
 public:
   DoorPhysDefClass(void);
@@ -98,6 +99,7 @@ protected:
 /*
 ** DoorPhysClass
 */
+class DoorNetworkObjectClass; // declared ahead of its friend use (MSVC-only lookup)
 class DoorPhysClass : public AccessiblePhysClass {
 public:
   //	Constructor and Destructor

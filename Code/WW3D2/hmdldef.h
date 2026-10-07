@@ -68,6 +68,8 @@ struct HmdlNodeDefStruct {
 **	The asset manager stores these objects internally and uses them to
 **	create instances of HierarchyModels for the user.
 */
+class HModelClass; // declared ahead of its friend use (MSVC-only lookup)
+class HLodClass; // declared ahead of its friend use (MSVC-only lookup)
 class HModelDefClass {
 
 public:

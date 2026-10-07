@@ -81,6 +81,7 @@ class ChunkLoadClass;
 ** Basically this class simply associates a name with a render object
 ** creation function.
 */
+class WW3DAssetManager; // declared ahead of its friend use (MSVC-only lookup)
 class PrototypeClass {
 
 public:

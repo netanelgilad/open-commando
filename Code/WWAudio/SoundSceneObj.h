@@ -74,6 +74,8 @@ const uint32 SOUND_OBJ_START_ID = 1000000000;
 // object that will be inserted in the culling system.
 //
 /////////////////////////////////////////////////////////////////////////////////
+class WWAudioClass; // declared ahead of its friend use (MSVC-only lookup)
+class HandleMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class SoundSceneObjClass : public MultiListObjectClass, public PersistClass, public RefCountClass {
 public:
   //////////////////////////////////////////////////////////////////////

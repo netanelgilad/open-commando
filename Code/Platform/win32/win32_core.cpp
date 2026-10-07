@@ -346,13 +346,49 @@ extern "C" DWORD GetModuleFileNameA(HMODULE, LPSTR buf, DWORD size) {
   return (DWORD)strlen(buf);
 }
 extern "C" HMODULE GetModuleHandleA(LPCSTR) { return (HMODULE)0x400000; }
+// "DLLs" the web build provides in-process. The engine loads D3D9.DLL and
+// DINPUT8.DLL dynamically; referencing the entry points here also keeps
+// their objects linked.
+struct IDirect3D9;
+extern "C" IDirect3D9 *Direct3DCreate9(UINT sdk_version);
+extern "C" HRESULT DirectInput8Create(HINSTANCE, DWORD, const GUID &, LPVOID *, void *);
+namespace {
+struct BuiltinExport {
+  const char *module;
+  const char *name;
+  FARPROC fn;
+};
+const BuiltinExport BuiltinExports[] = {
+    {"d3d9.dll", "Direct3DCreate9", (FARPROC)&Direct3DCreate9},
+    {"dinput8.dll", "DirectInput8Create", (FARPROC)&DirectInput8Create},
+};
+const char *Module_Base_Name(const char *name) {
+  const char *base = name;
+  for (const char *p = name; *p; ++p)
+    if (*p == '\\' || *p == '/')
+      base = p + 1;
+  return base;
+}
+} // namespace
+
 extern "C" HMODULE LoadLibraryA(LPCSTR name) {
+  if (name) {
+    const char *base = Module_Base_Name(name);
+    for (const BuiltinExport &e : BuiltinExports)
+      if (strcasecmp(e.module, base) == 0)
+        return (HMODULE)(const void *)e.module;
+  }
   fprintf(stderr, "[win32] LoadLibrary(%s) -> not available\n", name ? name : "");
   SetLastError(ERROR_FILE_NOT_FOUND);
   return nullptr;
 }
 extern "C" BOOL FreeLibrary(HMODULE) { return TRUE; }
-extern "C" FARPROC GetProcAddress(HMODULE, LPCSTR) { return nullptr; }
+extern "C" FARPROC GetProcAddress(HMODULE mod, LPCSTR name) {
+  for (const BuiltinExport &e : BuiltinExports)
+    if ((const void *)e.module == (const void *)mod && name && strcmp(e.name, name) == 0)
+      return e.fn;
+  return nullptr;
+}
 extern "C" HANDLE GetCurrentProcess(void) { return PseudoProcess; }
 extern "C" DWORD GetCurrentProcessId(void) { return 1; }
 extern "C" HANDLE GetCurrentThread(void) { return PseudoThread; }
@@ -795,3 +831,18 @@ extern "C" char *_fullpath(char *abs, const char *rel, size_t max) {
 }
 
 // _rotl/_rotr are compiler builtins under -fms-extensions.
+
+extern "C" int _wtoi(const wchar_t *s) { return (int)wcstol(s, nullptr, 10); }
+extern "C" long _wtol(const wchar_t *s) { return wcstol(s, nullptr, 10); }
+extern "C" unsigned char *_mbsinc(const unsigned char *s) { return (unsigned char *)(s + 1); }
+extern "C" size_t _mbslen(const unsigned char *s) { return strlen((const char *)s); }
+extern "C" size_t _mbsnccnt(const unsigned char *s, size_t n) {
+  size_t len = strlen((const char *)s);
+  return len < n ? len : n;
+}
+extern "C" BOOL IsDBCSLeadByte(BYTE) { return FALSE; }
+extern "C" int GetKeyboardLayoutList(int n, HKL *list) {
+  if (n > 0 && list)
+    list[0] = GetKeyboardLayout(0);
+  return 1;
+}

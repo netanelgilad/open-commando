@@ -94,6 +94,7 @@ struct W3dRingStruct {
 ** RingRenderObjClass: Procedurally generated render rings
 **
 */
+class RingPrototypeClass; // declared ahead of its friend use (MSVC-only lookup)
 class RingRenderObjClass : public RenderObjClass {
 
 public:

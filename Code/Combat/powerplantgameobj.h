@@ -54,6 +54,7 @@ class BaseControllerClass;
 //	PowerPlantGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class PowerPlantGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class PowerPlantGameObjDef : public BuildingGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

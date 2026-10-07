@@ -81,6 +81,7 @@ class ScriptZoneGameObj;
 /*
 ** ScriptableGameObjDef - Defintion class for a ScriptableGameObj
 */
+class ScriptableGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class ScriptableGameObjDef : public BaseGameObjDef {
 public:
   ScriptableGameObjDef(void);

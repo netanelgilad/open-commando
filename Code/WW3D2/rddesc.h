@@ -63,6 +63,8 @@ public:
   int RefreshRate;
 };
 
+class WW3D; // declared ahead of its friend use (MSVC-only lookup)
+class DX8Wrapper; // declared ahead of its friend use (MSVC-only lookup)
 class RenderDeviceDescClass {
 
 public:

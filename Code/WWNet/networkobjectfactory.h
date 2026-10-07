@@ -54,6 +54,7 @@ class NetworkObjectClass;
 //	are responsible for creating new network objects for a particular class of objects.
 //
 //////////////////////////////////////////////////////////////////////////////////
+class NetworkObjectFactoryMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class NetworkObjectFactoryClass {
 public:
   //////////////////////////////////////////////////////////////

@@ -68,6 +68,7 @@ class AABoxRenderObjClass;
 ** tree we test their center-point against the non-inflated boxes and insert the object into
 ** the smallest leaf node that we can find.
 */
+class PhysicsSceneClass; // declared ahead of its friend use (MSVC-only lookup)
 class DynamicAABTreeCullClass : public PhysAABTreeCullClass {
 public:
   DynamicAABTreeCullClass(PhysicsSceneClass *pscene);

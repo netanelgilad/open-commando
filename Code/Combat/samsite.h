@@ -48,6 +48,7 @@
 /*
 ** SamSiteGameObjDef - Defintion class for a SamSiteGameObj
 */
+class SamSiteGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class SAMSiteGameObjDef : public SmartGameObjDef {
 public:
   SAMSiteGameObjDef(void);

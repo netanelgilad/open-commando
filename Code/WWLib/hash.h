@@ -48,6 +48,7 @@ class HashTableIteratorClass;
 /*
 ** HashableClass
 */
+class HashTableClass; // declared ahead of its friend use (MSVC-only lookup)
 class HashableClass {
 
 public:

@@ -69,6 +69,7 @@ typedef MultiListClass<LogicalListenerClass> LOGICAL_LISTENER_LIST;
 // a virtual world.  Used to efficiently cull sounds that are too far away
 // from the listner to be heard.
 //
+class WWAudioClass; // declared ahead of its friend use (MSVC-only lookup)
 class SoundSceneClass {
 public:
   //////////////////////////////////////////////////////////////////////

@@ -47,6 +47,7 @@ struct Channel;
 class cGameData;
 
 //-----------------------------------------------------------------------------
+class cGameChannelList; // declared ahead of its friend use (MSVC-only lookup)
 class cGameChannel : public RefCountClass {
   friend class cGameChannelList;
 

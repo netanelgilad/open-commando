@@ -76,6 +76,7 @@ struct DamageColorStruct
 ** to apply damage to meshes.  It contains replacement vertices,
 ** vertex colors and materials
 */
+class MeshClass; // declared ahead of its friend use (MSVC-only lookup)
 class DamageClass
 {
 public:

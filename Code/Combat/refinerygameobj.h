@@ -56,6 +56,7 @@ class VehicleGameObj;
 //	RefineryGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class RefineryGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class RefineryGameObjDef : public BuildingGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

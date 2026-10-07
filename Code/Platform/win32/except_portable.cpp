@@ -8,7 +8,9 @@ static bool TryingToExit = false;
 static void (*AppExceptionCallback)() = nullptr;
 static const char *(*AppVersionCallback)() = nullptr;
 
-int Stack_Walk(unsigned long *, int, void *) { return 0; }
+int Stack_Walk(unsigned long *, int, CONTEXT *) { return 0; }
+// No SEH: nothing ever reaches this, but threads register it as their handler.
+int Exception_Handler(int, EXCEPTION_POINTERS *) { return EXCEPTION_CONTINUE_SEARCH; }
 bool Lookup_Symbol(void *, char *symbol, int &displacement) {
   if (symbol) symbol[0] = 0;
   displacement = 0;

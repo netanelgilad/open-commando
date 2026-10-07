@@ -52,6 +52,7 @@
 /*
 ** Damage Zone Definition
 */
+class DamageZoneGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class DamageZoneGameObjDef : public BaseGameObjDef {
 
 public:

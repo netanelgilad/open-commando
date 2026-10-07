@@ -59,6 +59,7 @@ class Quaternion;
 
 ******************************************************************************/
 
+class HRawAnimClass; // declared ahead of its friend use (MSVC-only lookup)
 class MotionChannelClass {
 
 public:
@@ -161,6 +162,7 @@ WWINLINE int BitChannelClass::Get_Bit(int frame) const {
 
 ******************************************************************************/
 
+class HCompressedAnimClass; // declared ahead of its friend use (MSVC-only lookup)
 class TimeCodedMotionChannelClass {
 
 public:

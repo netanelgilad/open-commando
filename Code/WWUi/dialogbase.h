@@ -105,6 +105,7 @@ private:
 //	only parsed - the window isn't actually created.
 //
 ////////////////////////////////////////////////////////////////
+class DialogMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class DialogBaseClass : public RefCountClass, public ControlAdviseSinkClass, public Notifier<DialogEvent> {
 public:
   ////////////////////////////////////////////////////////////////

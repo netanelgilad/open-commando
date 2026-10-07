@@ -1194,3 +1194,120 @@ BOOL UnmapViewOfFile(LPCVOID p);
 #include "mmsystem.h"
 
 #include "wingdi.h"
+
+/* ---------------------------------------- controls, dialogs, locale */
+#include "imm.h"
+
+#define WS_GROUP 0x00020000L
+#define WS_TABSTOP 0x00010000L
+#define BS_PUSHBUTTON 0x00000000L
+#define BS_DEFPUSHBUTTON 0x00000001L
+#define BS_CHECKBOX 0x00000002L
+#define BS_AUTOCHECKBOX 0x00000003L
+#define BS_RADIOBUTTON 0x00000004L
+#define BS_3STATE 0x00000005L
+#define BS_AUTO3STATE 0x00000006L
+#define BS_GROUPBOX 0x00000007L
+#define BS_AUTORADIOBUTTON 0x00000009L
+#define BS_OWNERDRAW 0x0000000BL
+#define BS_TYPEMASK 0x0000000FL
+#define BS_LEFT 0x00000100L
+#define BS_RIGHT 0x00000200L
+#define BS_CENTER 0x00000300L
+#define BS_BITMAP 0x00000080L
+#define BS_FLAT 0x00008000L
+#define BN_CLICKED 0
+#define CBS_SIMPLE 0x0001L
+#define CBS_DROPDOWN 0x0002L
+#define CBS_DROPDOWNLIST 0x0003L
+#define CBS_OEMCONVERT 0x0080L
+#define ES_LEFT 0x0000L
+#define ES_CENTER 0x0001L
+#define ES_RIGHT 0x0002L
+#define ES_MULTILINE 0x0004L
+#define ES_PASSWORD 0x0020L
+#define ES_AUTOVSCROLL 0x0040L
+#define ES_AUTOHSCROLL 0x0080L
+#define ES_OEMCONVERT 0x0400L
+#define ES_READONLY 0x0800L
+#define ES_NUMBER 0x2000L
+#define SS_LEFT 0x00000000L
+#define SS_CENTER 0x00000001L
+#define SS_RIGHT 0x00000002L
+#define SS_ICON 0x00000003L
+#define SS_BLACKRECT 0x00000004L
+#define SS_BLACKFRAME 0x00000007L
+#define SS_LEFTNOWORDWRAP 0x0000000CL
+#define SS_BITMAP 0x0000000EL
+#define SS_ETCHEDHORZ 0x00000010L
+#define SS_TYPEMASK 0x0000001FL
+#define SS_CENTERIMAGE 0x00000200L
+#define LVS_NOCOLUMNHEADER 0x4000
+#define DS_SETFONT 0x40L
+#define DS_MODALFRAME 0x80L
+#define RT_DIALOG MAKEINTRESOURCE(5)
+#define PROGRESS_CLASSW L"msctls_progress32"
+#define PROGRESS_CLASSA "msctls_progress32"
+#define SPI_GETWHEELSCROLLLINES 0x0068
+#define WM_INPUTLANGCHANGEREQUEST 0x0050
+#define NORM_IGNORECASE 0x00000001
+#define CSTR_LESS_THAN 1
+#define CSTR_EQUAL 2
+#define CSTR_GREATER_THAN 3
+#define LOCALE_IDEFAULTANSICODEPAGE 0x00001004
+
+/* Binary dialog templates (RT_DIALOG resources) are WORD-packed. */
+#pragma pack(push, 2)
+typedef struct {
+    DWORD style;
+    DWORD dwExtendedStyle;
+    WORD cdit;
+    short x, y, cx, cy;
+} DLGTEMPLATE, *LPDLGTEMPLATE;
+typedef struct {
+    DWORD style;
+    DWORD dwExtendedStyle;
+    short x, y, cx, cy;
+    WORD id;
+} DLGITEMTEMPLATE, *LPDLGITEMTEMPLATE;
+#pragma pack(pop)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int CompareStringW(LCID locale, DWORD flags, LPCWSTR a, int alen, LPCWSTR b, int blen);
+int GetLocaleInfoA(LCID locale, DWORD type, LPSTR buf, int len);
+#define GetLocaleInfo GetLocaleInfoA
+#ifdef __cplusplus
+}
+#endif
+#ifdef __cplusplus
+extern "C" {
+#endif
+HMENU GetMenu(HWND w);
+BOOL SetMenu(HWND w, HMENU m);
+#ifdef __cplusplus
+}
+#endif
+
+#define SORT_DEFAULT 0x0
+#define MAKELCID(lgid, srtid) ((DWORD)((((DWORD)((WORD)(srtid))) << 16) | ((DWORD)((WORD)(lgid)))))
+#ifdef __cplusplus
+extern "C" {
+#endif
+BOOL IsDBCSLeadByte(BYTE c);
+int GetKeyboardLayoutList(int n, HKL *list);
+#ifdef __cplusplus
+}
+#endif
+
+/* SEH types: declared so prototypes compile; never populated on the web. */
+typedef struct _CONTEXT CONTEXT, *PCONTEXT;
+typedef struct _EXCEPTION_RECORD EXCEPTION_RECORD, *PEXCEPTION_RECORD;
+typedef struct _EXCEPTION_POINTERS {
+    PEXCEPTION_RECORD ExceptionRecord;
+    PCONTEXT ContextRecord;
+} EXCEPTION_POINTERS, *PEXCEPTION_POINTERS, *LPEXCEPTION_POINTERS;
+#define EXCEPTION_EXECUTE_HANDLER 1
+#define EXCEPTION_CONTINUE_SEARCH 0
+#define EXCEPTION_CONTINUE_EXECUTION (-1)

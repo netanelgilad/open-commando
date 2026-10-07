@@ -60,6 +60,7 @@ class ChunkSaveClass;
 ** This is a derived axis-aligned bounding box tree for culling static objects.
 ** It adds the visibility code to the basic AAB-Tree culling system
 */
+class PhysicsSceneClass; // declared ahead of its friend use (MSVC-only lookup)
 class StaticAABTreeCullClass : public PhysAABTreeCullClass {
 
 public:

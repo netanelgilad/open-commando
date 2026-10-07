@@ -57,6 +57,7 @@ class AudibleSoundClass;
 //	BeaconGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class BeaconGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class BeaconGameObjDef : public SimpleGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

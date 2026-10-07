@@ -84,6 +84,7 @@ class ShortcutBarCtrlClass;
 //	DialogControlClass
 //
 ////////////////////////////////////////////////////////////////
+class DialogMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class DialogControlClass : public ControlAdviseSinkClass {
 public:
   ////////////////////////////////////////////////////////////////

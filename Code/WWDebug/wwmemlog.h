@@ -86,6 +86,7 @@ enum {
 ** 	WWMemoryLogClass::Release_Memory(ptr);
 ** }
 */
+class WWMemorySampleClass; // declared ahead of its friend use (MSVC-only lookup)
 class WWMemoryLogClass {
 public:
   /*

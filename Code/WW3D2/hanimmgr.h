@@ -70,6 +70,7 @@ private:
         This class is used to keep track of all of the motion data.
 */
 
+class HAnimManagerIterator; // declared ahead of its friend use (MSVC-only lookup)
 class HAnimManagerClass {
 
 public:

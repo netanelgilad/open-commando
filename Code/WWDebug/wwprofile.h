@@ -96,6 +96,7 @@ protected:
 /*
 ** An iterator to navigate through the tree
 */
+class WWProfileManager; // declared ahead of its friend use (MSVC-only lookup)
 class WWProfileIterator {
 public:
   // Access all the children of the current parent

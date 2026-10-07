@@ -38,6 +38,8 @@
 
 #include "dprint.h"
 
+class ScriptList; // declared ahead of its friend use (MSVC-only lookup)
+class ScriptListIter; // declared ahead of its friend use (MSVC-only lookup)
 class ScriptNode {
 public:
   virtual ~ScriptNode() {}

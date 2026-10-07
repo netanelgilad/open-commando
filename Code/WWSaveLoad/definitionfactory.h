@@ -52,6 +52,7 @@ class DefinitionClass;
 //	are responsible for creating new definitions for a particular class of objects.
 //
 //////////////////////////////////////////////////////////////////////////////////
+class DefinitionFactoryMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class DefinitionFactoryClass {
 public:
   //////////////////////////////////////////////////////////////

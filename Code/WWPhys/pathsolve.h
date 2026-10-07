@@ -69,6 +69,8 @@ typedef DynamicVectorClass<AABoxClass *> BOX_LIST;
 //	PathSolveClass
 //
 /////////////////////////////////////////////////////////////////////////
+class PathMgrClass; // declared ahead of its friend use (MSVC-only lookup)
+class PathClass; // declared ahead of its friend use (MSVC-only lookup)
 class PathSolveClass : public RefCountClass, public PostLoadableClass {
 public:
   /////////////////////////////////////////////////////////////////////////

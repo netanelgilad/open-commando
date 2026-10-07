@@ -97,6 +97,12 @@ char *_i64toa(long long value, char *buf, int radix);
 void _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext);
 void _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext);
 char *_fullpath(char *abs, const char *rel, size_t max);
+int _wtoi(const wchar_t *s);
+long _wtol(const wchar_t *s);
+/* Multibyte helpers: the ANSI code page here is single-byte (1252). */
+unsigned char *_mbsinc(const unsigned char *s);
+size_t _mbslen(const unsigned char *s);
+size_t _mbsnccnt(const unsigned char *s, size_t n);
 #ifdef __cplusplus
 }
 #endif

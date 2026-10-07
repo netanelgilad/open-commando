@@ -74,6 +74,7 @@ typedef enum {
 /*
 ** ZoneGameObjDef - Defintion class for a ZoneGameObj
 */
+class ScriptZoneGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class ScriptZoneGameObjDef : public ScriptableGameObjDef {
 public:
   ScriptZoneGameObjDef(void);

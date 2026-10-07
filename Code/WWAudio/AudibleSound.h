@@ -79,6 +79,7 @@ const int INFINITE_LOOPS = 0;
 //	Base class defining a common interface to all sound object types.
 //
 /////////////////////////////////////////////////////////////////////////////////
+class WWAudioClass; // declared ahead of its friend use (MSVC-only lookup)
 class AudibleSoundClass : public SoundSceneObjClass {
 public:
   //////////////////////////////////////////////////////////////////////

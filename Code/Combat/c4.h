@@ -55,6 +55,7 @@ class StaticAnimPhysClass;
 /*
 ** C4GameObjDef - Defintion class for a C4GameObj
 */
+class C4GameObj; // declared ahead of its friend use (MSVC-only lookup)
 class C4GameObjDef : public SimpleGameObjDef {
 public:
   C4GameObjDef(void);

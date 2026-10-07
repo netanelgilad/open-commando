@@ -518,3 +518,6 @@ extern "C" BOOL IsClipboardFormatAvailable(UINT) { return FALSE; }
 extern "C" HIMC ImmGetContext(HWND) { return nullptr; }
 extern "C" BOOL ImmReleaseContext(HWND, HIMC) { return TRUE; }
 extern "C" HIMC ImmAssociateContext(HWND, HIMC) { return nullptr; }
+
+extern "C" HMENU GetMenu(HWND) { return nullptr; } // the game window has no menu bar
+extern "C" BOOL SetMenu(HWND, HMENU) { return TRUE; }

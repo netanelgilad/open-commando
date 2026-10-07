@@ -83,12 +83,15 @@ using ThreadInfoType = struct tThreadInfoType {
 
 #else // portable
 
+#include "win.h"
+
 /*
 ** Portable subset: no SEH or stack walking. Thread registration and the
 ** exit flag keep their meaning; exception callbacks are stored but only
 ** invoked from the web runtime's abort hook.
 */
-int Stack_Walk(unsigned long *return_addresses, int num_addresses, void *context = nullptr);
+int Exception_Handler(int exception_code, EXCEPTION_POINTERS *e_info);
+int Stack_Walk(unsigned long *return_addresses, int num_addresses, CONTEXT *context = nullptr);
 bool Lookup_Symbol(void *code_ptr, char *symbol, int &displacement);
 void Load_Image_Helper();
 void Register_Thread_ID(unsigned long thread_id, const char *thread_name, bool main = false);

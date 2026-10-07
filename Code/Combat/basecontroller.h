@@ -65,6 +65,7 @@ class BeaconGameObj;
 //	BaseControllerClass
 //
 ////////////////////////////////////////////////////////////////
+class BuildingMonitorClass; // declared ahead of its friend use (MSVC-only lookup)
 class BaseControllerClass : public NetworkObjectClass {
 public:
   ////////////////////////////////////////////////////////////////

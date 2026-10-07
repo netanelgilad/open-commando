@@ -94,6 +94,7 @@ private:
 ** DecorationPhysDefClass
 ** Definition data structure for DecorationPhysClass
 */
+class StaticPhysClass; // declared ahead of its friend use (MSVC-only lookup)
 class DecorationPhysDefClass : public DynamicPhysDefClass {
 public:
   DecorationPhysDefClass(void);

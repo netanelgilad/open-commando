@@ -173,6 +173,9 @@ public:
 
 */
 
+class RObjIterator; // declared ahead of its friend use (MSVC-only lookup)
+class HTreeIterator; // declared ahead of its friend use (MSVC-only lookup)
+class Font3DDataIterator; // declared ahead of its friend use (MSVC-only lookup)
 class WW3DAssetManager {
 
 public:

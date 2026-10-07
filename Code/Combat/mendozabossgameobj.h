@@ -55,6 +55,7 @@ class PowerUpGameObj;
 //	MendozaBossGameObjDefClass
 //
 //////////////////////////////////////////////////////////////////////
+class MendozaBossGameObjClass; // declared ahead of its friend use (MSVC-only lookup)
 class MendozaBossGameObjDefClass : public SoldierGameObjDef {
 public:
   DECLARE_EDITABLE(MendozaBossGameObjDefClass, SoldierGameObjDef);

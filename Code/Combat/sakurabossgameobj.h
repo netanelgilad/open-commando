@@ -56,6 +56,7 @@
 //	SakuraBossGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class SakuraBossGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class SakuraBossGameObjDef : public VehicleGameObjDef {
 public:
   DECLARE_EDITABLE(SakuraBossGameObjDef, VehicleGameObjDef);

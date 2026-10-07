@@ -376,6 +376,7 @@ protected:
   float WarBlitzDistribution;
 };
 
+class BackgroundMgrClass; // declared ahead of its friend use (MSVC-only lookup)
 class BackgroundParameterClass {
 public:
   void Initialize();

@@ -63,6 +63,8 @@ class SoldierGameObj;
 /*
 **
 */
+class SpawnerClass; // declared ahead of its friend use (MSVC-only lookup)
+class SpawnManager; // declared ahead of its friend use (MSVC-only lookup)
 class SpawnerDefClass : public DefinitionClass {
 
 public:

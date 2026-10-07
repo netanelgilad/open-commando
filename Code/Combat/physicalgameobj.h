@@ -74,6 +74,7 @@ class ActiveConversationClass;
 /*
 ** PhysicalGameObjDef - Defintion class for a PhysicalGameObj
 */
+class PhysicalGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class PhysicalGameObjDef : public DamageableGameObjDef {
 public:
   PhysicalGameObjDef(void);

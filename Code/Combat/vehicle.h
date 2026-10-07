@@ -86,6 +86,7 @@ enum {
 /*
 ** VehicleGameObjDef - Defintion class for a VehicleGameObj
 */
+class VehicleGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class VehicleGameObjDef : public SmartGameObjDef {
 public:
   VehicleGameObjDef(void);

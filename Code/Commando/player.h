@@ -60,6 +60,7 @@ class ChunkLoadClass;
 //
 // Holds data about a player
 //
+class cPlayerManager; // declared ahead of its friend use (MSVC-only lookup)
 class cPlayer : public PlayerDataClass, public NetworkObjectClass {
 
 public:

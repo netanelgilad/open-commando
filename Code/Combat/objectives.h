@@ -99,6 +99,7 @@ struct Objective {
 /*
 **
 */
+class ObjectivesViewerClass; // declared ahead of its friend use (MSVC-only lookup)
 class ObjectiveManager {
 public:
   enum {

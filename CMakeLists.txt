@@ -23,7 +23,8 @@ if(REBEL_PORTABLE)
     set(REBEL_ENABLE_TOOLS OFF)
     # Replacement Win32 / D3D / Miles / Bink headers live here; backends in Code/Platform
     include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/Code/Platform/compat")
-    add_compile_definitions(REBEL_PORTABLE)
+    # _WINDOWS: the compat layer provides Win32, so take the engine's Windows paths.
+    add_compile_definitions(REBEL_PORTABLE _WINDOWS)
     add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/rebel_portable.h" -fwasm-exceptions -pthread)
     add_link_options(-fwasm-exceptions -pthread)
     add_compile_options(-Wno-everything -fms-extensions -fno-delayed-template-parsing)

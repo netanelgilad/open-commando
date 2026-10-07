@@ -4,6 +4,7 @@ file(GLOB REBEL_PLATFORM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/win32/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/input/*.cpp
 )
 add_library(RebelPlatform STATIC ${REBEL_PLATFORM_SOURCES})
 target_include_directories(RebelPlatform

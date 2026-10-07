@@ -72,6 +72,8 @@ class DX8FVFCategoryContainer;
 /**
 ** MeshClass -- Render3DObject for rendering meshes.
 */
+class DX8MeshRendererClass; // declared ahead of its friend use (MSVC-only lookup)
+class DX8PolygonRendererClass; // declared ahead of its friend use (MSVC-only lookup)
 class MeshClass : public RenderObjClass {
 public:
   MeshClass(void);

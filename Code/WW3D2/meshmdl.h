@@ -116,6 +116,9 @@ struct VertexFormatXYZNDUV2;
 ** Texture, Shader, Material,
 ** TextureArray, MaterialArray, ShaderArray
 */
+class MeshDeformSetClass; // declared ahead of its friend use (MSVC-only lookup)
+class MeshDeformClass; // declared ahead of its friend use (MSVC-only lookup)
+class DX8PolygonRendererClass; // declared ahead of its friend use (MSVC-only lookup)
 class MeshModelClass : public MeshGeometryClass {
 public:
   MeshModelClass(void);

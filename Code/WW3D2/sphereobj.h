@@ -152,6 +152,7 @@ typedef AlphaVectorChannel SphereVectorChannelClass;
 
 class VertexMaterialClass;
 
+class SphereRenderObjClass; // declared ahead of its friend use (MSVC-only lookup)
 class SphereMeshClass {
   friend class SphereRenderObjClass;
 
@@ -217,6 +218,7 @@ inline void SphereMeshClass::Set_DCG(bool is_additive, int index, float value) {
 ** SphereRenderObjClass: Procedurally generated render spheres
 **
 */
+class SpherePrototypeClass; // declared ahead of its friend use (MSVC-only lookup)
 class SphereRenderObjClass : public RenderObjClass {
 
 public:

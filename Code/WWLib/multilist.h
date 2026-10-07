@@ -113,6 +113,7 @@ public:
 ** This simply contains the head node for a list.  This is a doubly circularly linked list where
 ** our head node is a sentry.  To easily iterate the list use the iterator defined below.
 */
+class GenericMultiListIterator; // declared ahead of its friend use (MSVC-only lookup)
 class GenericMultiListClass {
 public:
   GenericMultiListClass() {

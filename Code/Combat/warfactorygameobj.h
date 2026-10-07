@@ -52,6 +52,7 @@ class BaseControllerClass;
 //	WarFactoryGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class WarFactoryGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class WarFactoryGameObjDef : public VehicleFactoryGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

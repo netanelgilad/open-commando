@@ -77,6 +77,7 @@ class StealthEffectClass;
 /*
 ** SmartGameObjDef - Defintion class for a SmartGameObj
 */
+class SmartGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class SmartGameObjDef : public ArmedGameObjDef {
 public:
   SmartGameObjDef(void);

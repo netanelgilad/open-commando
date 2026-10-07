@@ -46,6 +46,7 @@
 //	Class defining the 'listeners' 3D position/velocity in the world.  This should
 // only be used by the SoundSceneClass.
 //
+class SoundSceneClass; // declared ahead of its friend use (MSVC-only lookup)
 class Listener3DClass : public Sound3DClass {
 public:
   //////////////////////////////////////////////////////////////////////

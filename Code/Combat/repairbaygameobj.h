@@ -55,6 +55,7 @@ class SimpleGameObj;
 //	RepairBayGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class RepairBayGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class RepairBayGameObjDef : public BuildingGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

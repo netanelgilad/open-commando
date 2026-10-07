@@ -52,6 +52,7 @@
 /*
 ** TransitionGameObjDef - Defintion class for a TransitionGameObj
 */
+class TransitionGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class TransitionGameObjDef : public BaseGameObjDef {
 public:
   TransitionGameObjDef(void) {};

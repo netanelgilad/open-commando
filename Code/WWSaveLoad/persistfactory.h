@@ -55,6 +55,7 @@
 ** derived PersistClass.
 */
 
+class SaveLoadSystemClass; // declared ahead of its friend use (MSVC-only lookup)
 class PersistFactoryClass {
 public:
   PersistFactoryClass();

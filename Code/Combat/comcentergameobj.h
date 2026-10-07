@@ -54,6 +54,7 @@ class BaseControllerClass;
 //	ComCenterGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class ComCenterGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class ComCenterGameObjDef : public BuildingGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

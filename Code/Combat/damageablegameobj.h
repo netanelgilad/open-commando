@@ -49,6 +49,7 @@
 /*
 ** DamageableGameObjDef - Defintion class for a DamageableGameObj
 */
+class DamageableGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class DamageableGameObjDef : public ScriptableGameObjDef {
 public:
   DamageableGameObjDef(void);

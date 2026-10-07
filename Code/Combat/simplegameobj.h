@@ -50,6 +50,7 @@
 /*
 ** SimpleGameObjDef - Defintion class for a SimpleGameObj
 */
+class SimpleGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class SimpleGameObjDef : public PhysicalGameObjDef {
 public:
   SimpleGameObjDef(void);

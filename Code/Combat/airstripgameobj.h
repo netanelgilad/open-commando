@@ -52,6 +52,7 @@ class BaseControllerClass;
 //	AirStripGameObjDef
 //
 ////////////////////////////////////////////////////////////////
+class AirStripGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class AirStripGameObjDef : public VehicleFactoryGameObjDef {
 public:
   ////////////////////////////////////////////////////////////////

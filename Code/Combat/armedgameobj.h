@@ -58,6 +58,7 @@ class WeaponBagClass;
 /*
 ** ArmedGameObjDef - Defintion class for a ArmedGameObj
 */
+class ArmedGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class ArmedGameObjDef : public PhysicalGameObjDef {
 public:
   ArmedGameObjDef(void);

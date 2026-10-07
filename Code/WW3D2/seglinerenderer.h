@@ -58,6 +58,7 @@ struct W3dEmitterLinePropertiesStruct;
 ** This class implements the low-level line rendering functionality used by both SegmentedLineClass
 ** and ParticleBufferClass
 */
+class SegmentedLineClass; // declared ahead of its friend use (MSVC-only lookup)
 class SegLineRendererClass {
 public:
   SegLineRendererClass(void);

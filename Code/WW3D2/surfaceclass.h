@@ -58,6 +58,7 @@ class Vector3;
 ** Hector Yee 2/12/01 - added in fills, blits etc for font3d class
 **
 *************************************************************************/
+class TextureClass; // declared ahead of its friend use (MSVC-only lookup)
 class SurfaceClass : public RefCountClass {
 public:
   struct SurfaceDescription {
