@@ -66,3 +66,4 @@ git-hash.txt
 wwconfig_ids.rpt
 wwconfig_ids.h
 IDL_*.loc
+build/

@@ -157,6 +157,10 @@ bool Get_Image_File_Header(const char *filename, IMAGE_FILE_HEADER *file_header)
 ////////////////////////////////////////////////////////////////////////
 bool Get_Image_File_Header(HINSTANCE app_instance, IMAGE_FILE_HEADER *file_header) {
   bool retval = false;
+#ifdef REBEL_PORTABLE
+  // There is no PE image mapped in memory on the web; treat as unknown.
+  return retval;
+#endif
 
   //
   //	Read the dos header (all PE exectuable files begin with this)

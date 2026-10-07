@@ -65,6 +65,12 @@ public:
   ////////////////////////////////////////////////////////////
   StringClass(bool hint_temporary);
   StringClass(size_t initial_len = 0, bool hint_temporary = false);
+#ifdef REBEL_PORTABLE
+  // MSVC resolved StringClass(0u, true) to the length ctor; clang sees the
+  // literal as a null pointer too. Exact-match overloads keep MSVC's choice.
+  StringClass(unsigned int initial_len, bool hint_temporary = false) : StringClass((size_t)initial_len, hint_temporary) {}
+  StringClass(int initial_len, bool hint_temporary = false) : StringClass((size_t)initial_len, hint_temporary) {}
+#endif
   StringClass(const StringClass &string, bool hint_temporary = false);
   StringClass(const TCHAR *string, bool hint_temporary = false);
   StringClass(TCHAR ch, bool hint_temporary = false);

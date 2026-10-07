@@ -138,20 +138,32 @@ static unsigned Calculate_Processor_Speed(__int64 &ticks_per_second) {
     unsigned timer1_l;
   } Time;
 
+  
+#ifndef REBEL_PORTABLE
   __asm {
 		ASM_RDTSC;
 		mov Time.timer0_h,eax
 		mov Time.timer0_l,edx
   }
+#else
+  Time.timer0_h = Time.timer0_l = 0;
+#endif
+
 
   unsigned start = TIMEGETTIME();
   unsigned elapsed;
   while ((elapsed = TIMEGETTIME() - start) < 200) {
-    __asm {
+    
+#ifndef REBEL_PORTABLE
+  __asm {
 			ASM_RDTSC;
 			mov Time.timer1_h,eax
 			mov Time.timer1_l,edx
     }
+#else
+      Time.timer1_h = Time.timer1_l = 0;
+#endif
+
   }
 
   __int64 t = *(__int64 *)&Time.timer1_h - *(__int64 *)&Time.timer0_h;
@@ -865,6 +877,8 @@ void CPUDetectClass::Init_CPUID_Instruction() {
   // because CodeWarrior seems to have problems with
   // the command (huh?)
 
+  
+#ifndef REBEL_PORTABLE
   __asm
       {
 		mov cpuid_available,0 // clear flag
@@ -885,6 +899,10 @@ done:
 		popfd
 		pop ebx
       }
+#else
+  cpuid_available = 0; // no CPUID in WebAssembly
+#endif
+
   HasCPUIDInstruction = !!cpuid_available;
 }
 
@@ -948,6 +966,8 @@ bool CPUDetectClass::CPUID(unsigned &u_eax_, unsigned &u_ebx_, unsigned &u_ecx_,
   unsigned u_ecx;
   unsigned u_edx;
 
+  
+#ifndef REBEL_PORTABLE
   __asm
       {
 		pushad
@@ -962,6 +982,10 @@ bool CPUDetectClass::CPUID(unsigned &u_eax_, unsigned &u_ebx_, unsigned &u_ecx_,
 		mov		[u_edx],edx
 		popad
       }
+#else
+  u_eax = u_ebx = u_ecx = u_edx = 0;
+#endif
+
 
   u_eax_ = u_eax;
   u_ebx_ = u_ebx;

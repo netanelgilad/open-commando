@@ -83,6 +83,19 @@ unsigned long Get_CPU_Rate(unsigned long &high) {
   return (0);
 }
 
+#ifdef REBEL_PORTABLE
+// No RDTSC in WebAssembly: the "CPU clock" is a nanosecond monotonic counter.
+#include <chrono>
+unsigned long Get_CPU_Clock(unsigned long &high) {
+  unsigned long long ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::steady_clock::now().time_since_epoch())
+                              .count();
+  high = (unsigned long)(ns >> 32);
+  return (unsigned long)ns;
+}
+
+int Get_RDTSC_CPU_Speed() { return 1000; } // MHz equivalent of the ns counter
+#else
 unsigned long Get_CPU_Clock(unsigned long &high) {
   int h;
   int l;
@@ -250,3 +263,4 @@ int Get_RDTSC_CPU_Speed() {
 
   return (norm_freq);
 }
+#endif // REBEL_PORTABLE

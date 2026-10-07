@@ -107,6 +107,10 @@ set(SOURCES
     #xsurface.cpp
 )
 
+if(REBEL_PORTABLE)
+    # COM automation glue for the embedded IE browser; no equivalent on the web
+    list(REMOVE_ITEM SOURCES WWCOMUtil.cpp)
+endif()
 add_library(WWLib STATIC ${SOURCES})
 target_include_directories(WWLib PUBLIC
     $<BUILD_INTERFACE:
