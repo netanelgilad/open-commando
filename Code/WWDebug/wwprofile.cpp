@@ -80,7 +80,7 @@ unsigned WWProfile_Get_System_Time() { return TIMEGETTIME(); }
  *   9/24/2000  gth : Created.                                                                 *
  *=============================================================================================*/
 inline void WWProfile_Get_Ticks(int64_t *ticks) {
-#ifdef _UNIX
+#if defined(_UNIX) || defined(REBEL_PORTABLE)
   *ticks = TIMEGETTIME();
 #else
   __asm

@@ -1172,3 +1172,20 @@ LONG RegSetValueExW(HKEY key, LPCWSTR name, DWORD reserved, DWORD type, const BY
 #ifdef __cplusplus
 }
 #endif
+
+#define EVENT_MODIFY_STATE 0x0002
+#define SYNCHRONIZE 0x00100000L
+#define FILE_MAP_WRITE 0x0002
+#define FILE_MAP_READ 0x0004
+#ifdef __cplusplus
+extern "C" {
+#endif
+HANDLE OpenEventA(DWORD access, BOOL inherit, LPCSTR name);
+#define OpenEvent OpenEventA
+HANDLE CreateFileMappingA(HANDLE file, LPSECURITY_ATTRIBUTES sa, DWORD prot, DWORD hi, DWORD lo, LPCSTR name);
+#define CreateFileMapping CreateFileMappingA
+LPVOID MapViewOfFile(HANDLE map, DWORD access, DWORD hi, DWORD lo, SIZE_T n);
+BOOL UnmapViewOfFile(LPCVOID p);
+#ifdef __cplusplus
+}
+#endif

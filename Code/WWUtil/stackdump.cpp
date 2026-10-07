@@ -45,6 +45,19 @@
 
 #include "wwdebug.h"
 
+#ifdef REBEL_PORTABLE
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+// No dbghelp on the web: let the JS runtime print the wasm call stack.
+void cStackDump::Print_Call_Stack() {
+#ifdef __EMSCRIPTEN__
+  char buffer[8192];
+  emscripten_get_callstack(EM_LOG_C_STACK, buffer, sizeof(buffer));
+  OutputDebugStringA(buffer);
+#endif
+}
+#else
 typedef BOOL(WINAPI *SymCleanupType)(HANDLE hProcess);
 typedef BOOL(WINAPI *SymGetSymFromAddrType)(HANDLE hProcess, DWORD Address, LPDWORD Displacement,
                                             PIMAGEHLP_SYMBOL Symbol);
@@ -223,3 +236,4 @@ if (gmf != 0)
         ::SetCurrentDirectory(path);
 }
 */
+#endif // REBEL_PORTABLE

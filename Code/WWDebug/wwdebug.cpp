@@ -286,7 +286,11 @@ void WWDebug_Assert_Fail(const char *expr, const char *file, int line) {
     }
 
     if (code == IDRETRY) {
+#ifdef REBEL_PORTABLE
+      __builtin_debugtrap();
+#else
       _asm int 3;
+#endif
       return;
     }
   }
@@ -410,6 +414,11 @@ void WWDebug_Profile_Stop(const char *title) {
  *   10/30/98    BMG : Created.                                                                *
  *=============================================================================================*/
 void WWDebug_DBWin32_Message_Handler(const char *str) {
+#ifdef REBEL_PORTABLE
+  // DBWIN32 shared-memory protocol is Windows-only; route to the debug console.
+  OutputDebugStringA(str);
+  return;
+#else
 
   HANDLE heventDBWIN; /* DBWIN32 synchronization object */
   HANDLE heventData;  /* data passing synch object */
@@ -462,5 +471,6 @@ void WWDebug_DBWin32_Message_Handler(const char *str) {
   CloseHandle(heventData);
   CloseHandle(heventDBWIN);
 
+#endif // REBEL_PORTABLE
 }
 #endif // WWDEBUG

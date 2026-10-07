@@ -109,7 +109,7 @@ set(SOURCES
 
 if(REBEL_PORTABLE)
     # COM automation glue for the embedded IE browser; no equivalent on the web
-    list(REMOVE_ITEM SOURCES WWCOMUtil.cpp)
+    list(REMOVE_ITEM SOURCES WWCOMUtil.cpp Except.cpp)
 endif()
 add_library(WWLib STATIC ${SOURCES})
 target_include_directories(WWLib PUBLIC
@@ -124,3 +124,7 @@ target_compile_definitions(WWLib PRIVATE
     STDC_HEADERS
     WIN32_LEAN_AND_MEAN
 )
+
+if(REBEL_PORTABLE)
+    target_link_libraries(WWLib PUBLIC RebelPlatform)
+endif()

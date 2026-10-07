@@ -81,6 +81,24 @@ using ThreadInfoType = struct tThreadInfoType {
   bool Main;
 };
 
+#else // portable
+
+/*
+** Portable subset: no SEH or stack walking. Thread registration and the
+** exit flag keep their meaning; exception callbacks are stored but only
+** invoked from the web runtime's abort hook.
+*/
+int Stack_Walk(unsigned long *return_addresses, int num_addresses, void *context = nullptr);
+bool Lookup_Symbol(void *code_ptr, char *symbol, int &displacement);
+void Load_Image_Helper();
+void Register_Thread_ID(unsigned long thread_id, const char *thread_name, bool main = false);
+void Unregister_Thread_ID(unsigned long thread_id, const char *thread_name);
+void Register_Application_Exception_Callback(void (*app_callback)());
+void Register_Application_Version_Callback(const char *(*app_version_callback)());
+void Set_Exit_On_Exception(bool set);
+bool Is_Trying_To_Exit();
+unsigned long Get_Main_Thread_ID();
+
 #endif //_MSC_VER
 
 #endif // EXCEPT_H

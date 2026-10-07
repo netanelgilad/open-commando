@@ -1,3 +1,6 @@
+if(REBEL_PORTABLE)
+    add_subdirectory(Platform)
+endif()
 add_subdirectory(BandTest)
 add_subdirectory(BinkMovie)
 add_subdirectory(Combat)

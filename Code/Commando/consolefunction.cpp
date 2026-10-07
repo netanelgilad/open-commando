@@ -3872,7 +3872,7 @@ public:
               sockaddr_in *addr = &client->Get_Address();
               sprintf(addr_string, "%d.%d.%d.%d;%d", (int)(addr->sin_addr.S_un.S_un_b.s_b1),
                       (int)(addr->sin_addr.S_un.S_un_b.s_b2), (int)(addr->sin_addr.S_un.S_un_b.s_b3),
-                      (int)(addr->sin_addr.S_un.S_un_b.s_b4), unsigned int(ntohs(addr->sin_port)));
+                      (int)(addr->sin_addr.S_un.S_un_b.s_b4), (unsigned int)(ntohs(addr->sin_port)));
               int addr_string_len = strlen(addr_string);
               char local_addr_string[128];
               strcpy(local_addr_string, addr_string);
