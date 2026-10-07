@@ -37,7 +37,9 @@
 #include "fromaddress.h"
 #include "msgstatlist.h"
 #include "wwprofile.h"
-#include "Commando/nat.h"
+#ifndef REBEL_PORTABLE
+#include "Commando/nat.h" // WOL NAT negotiation (COM/ATL; service is offline)
+#endif
 #include "packetmgr.h"
 #include "bwbalance.h"
 #include "packettype.h"
@@ -78,8 +80,8 @@ static constexpr int INVALID_RHOST_ID = -1;
  *=============================================================================================*/
 char *Addr_As_String(sockaddr_in *addr) {
   static char _string[128];
-  sprintf(_string, "%d.%d.%d.%d ; %d", (int)(addr->sin_addr.S_un.S_un_b.s_b1), (int)(addr->sin_addr.S_un.S_un_b.s_b2),
-          (int)(addr->sin_addr.S_un.S_un_b.s_b3), (int)(addr->sin_addr.S_un.S_un_b.s_b4), htonl((int)(addr->sin_port)));
+  sprintf(_string, "%d.%d.%d.%d ; %d", (int)(((const unsigned char *)&addr->sin_addr)[0]), (int)(((const unsigned char *)&addr->sin_addr)[1]),
+          (int)(((const unsigned char *)&addr->sin_addr)[2]), (int)(((const unsigned char *)&addr->sin_addr)[3]), htonl((int)(addr->sin_port)));
   return (_string);
 }
 // #endif //WWDEBUG
@@ -303,7 +305,9 @@ void cConnection::Init_As_Server(USHORT server_port, int max_players, bool is_de
     WWASSERT(num_tries < 50 && server_port <= MAX_SERVER_PORT);
 
     // Tell the firewall code that we started a new local server.
+#ifndef REBEL_PORTABLE
     WOLNATInterface.Set_Server(true);
+#endif
   }
 
   InitDone = true;
@@ -623,7 +627,9 @@ bool cConnection::Receive_Packet() {
   // Intercept packets intended for the firewall negotiation code.
   //
   if (packet.Get_Type() == PACKETTYPE_FIREWALL_PROBE) {
+#ifndef REBEL_PORTABLE
     WOLNATInterface.Intercept_Game_Packet(packet);
+#endif
     packet.Flush();
     WWDEBUG_SAY(("cConnection:: Packet transferred to WOLNAT interface\n"));
     return (true);

@@ -880,14 +880,7 @@ void PacketManagerClass::Flush(bool forced) {
         /*
         ** Reverse byte order to prevent the demo from having the same CRC as the game.
         */
-        _asm {
-				push	eax;
-				mov	eax,crc;
-				bswap	eax;
-				mov	crc,eax;
-				pop	eax;
-        }
-        ;
+        crc = __builtin_bswap32(crc); // was inline-asm bswap; same wire format
 #endif //(0)
         char *crc_and_buffer = (char *)_alloca(SendBuffers[i].PacketSendLength + sizeof(crc));
         *((unsigned long *)crc_and_buffer) = crc;
@@ -1147,14 +1140,7 @@ int PacketManagerClass::Get_Packet(SOCKET socket, unsigned char *packet_buffer, 
           /*
           ** Reverse byte order to prevent the demo from having the same CRC as the game.
           */
-          _asm {
-					push	eax;
-					mov	eax,crc;
-					bswap	eax;
-					mov	crc,eax;
-					pop	eax;
-          }
-          ;
+          crc = __builtin_bswap32(crc); // was inline-asm bswap; same wire format
 #endif //(0)
           if (crc != *((unsigned long *)packet_buffer)) {
             WWDEBUG_SAY(("PMC::Get_Packet: Socket %d, received packet %d bytes long from %s\n", socket, bytes,
