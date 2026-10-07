@@ -1190,3 +1190,5 @@ BOOL UnmapViewOfFile(LPCVOID p);
 #ifdef __cplusplus
 }
 #endif
+
+#include "mmsystem.h"

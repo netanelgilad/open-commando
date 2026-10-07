@@ -461,3 +461,54 @@ extern "C" BOOL TlsSetValue(DWORD i, LPVOID v) { return pthread_setspecific((pth
 extern "C" HANDLE CreateFileMappingA(HANDLE, LPSECURITY_ATTRIBUTES, DWORD, DWORD, DWORD, LPCSTR) { return nullptr; }
 extern "C" LPVOID MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, SIZE_T) { return nullptr; }
 extern "C" BOOL UnmapViewOfFile(LPCVOID) { return TRUE; }
+
+/* ------------------------------------------------- CRT thread entry points */
+
+#include "process.h"
+
+namespace {
+struct CrtThreadStart {
+  void (*start)(void *) = nullptr;
+  unsigned (*start_ex)(void *) = nullptr;
+  void *arg = nullptr;
+};
+DWORD Crt_Thread_Entry(LPVOID p) {
+  CrtThreadStart s = *static_cast<CrtThreadStart *>(p);
+  delete static_cast<CrtThreadStart *>(p);
+  if (s.start_ex)
+    return s.start_ex(s.arg);
+  s.start(s.arg);
+  return 0;
+}
+} // namespace
+
+extern "C" uintptr_t _beginthread(void (*start)(void *), unsigned stack, void *arg) {
+  CrtThreadStart *s = new CrtThreadStart;
+  s->start = start;
+  s->arg = arg;
+  HANDLE h = CreateThread(nullptr, stack, Crt_Thread_Entry, s, 0, nullptr);
+  if (!h) {
+    delete s;
+    return (uintptr_t)-1;
+  }
+  return (uintptr_t)h;
+}
+
+extern "C" uintptr_t _beginthreadex(void *, unsigned stack, unsigned (*start)(void *), void *arg, unsigned flags,
+                                    unsigned *thread_id) {
+  CrtThreadStart *s = new CrtThreadStart;
+  s->start_ex = start;
+  s->arg = arg;
+  DWORD id = 0;
+  HANDLE h = CreateThread(nullptr, stack, Crt_Thread_Entry, s, flags, &id);
+  if (!h) {
+    delete s;
+    return 0;
+  }
+  if (thread_id)
+    *thread_id = id;
+  return (uintptr_t)h;
+}
+
+extern "C" void _endthread(void) { ExitThread(0); }
+extern "C" void _endthreadex(unsigned code) { ExitThread(code); }
