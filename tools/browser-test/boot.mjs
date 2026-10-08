@@ -20,10 +20,20 @@ const lines = [];
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1).padStart(6);
 page.on('console', (m) => { const l = `${stamp()} [${m.type()}] ${m.text()}`; lines.push(l); if (!/progress/.test(l)) console.log(l); });
-page.on('pageerror', (e) => { const l = `${stamp()} [pageerror] ${e.message}`; lines.push(l); console.log(l); });
+page.on('pageerror', (e) => { const l = `${stamp()} [pageerror] ${e.message}\n${(e.stack || '').split('\n').slice(0, 25).join('\n')}`; lines.push(l); console.log(l); });
+const save = () => writeFileSync(`${outDir}/console.log`, lines.join('\n'));
+process.on('exit', save);
 await page.goto(url);
 // import + engine load
-await page.waitForSelector('#start:not([hidden])', { timeout: 30 * 60 * 1000 });
+try {
+  await page.waitForSelector('#start:not([hidden])', { timeout: Number(process.env.READY_TIMEOUT || 300000) });
+} catch (e) {
+  console.log(`${stamp()} never became ready: ${await page.$eval('#status', (x) => x.textContent).catch(() => '?')}`);
+  await page.screenshot({ path: `${outDir}/not-ready.png` });
+  save();
+  await ctx.close();
+  process.exit(1);
+}
 console.log(`${stamp()} ready, clicking Play`);
 await page.click('#start');
 for (let i = 1; i * 5 <= seconds; i++) {

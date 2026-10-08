@@ -81,7 +81,13 @@ FvfLayout Fvf_Layout(DWORD fvf) {
 
 namespace {
 
-std::unordered_map<std::string, std::unique_ptr<FfpProgram>> Cache;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::unordered_map<std::string, std::unique_ptr<FfpProgram>> &Cache_Instance() {
+  static std::unordered_map<std::string, std::unique_ptr<FfpProgram>> *instance = new std::unordered_map<std::string, std::unique_ptr<FfpProgram>>();
+  return *instance;
+}
+#define Cache Cache_Instance()
 
 const char *Arg_Expr(int arg, int stage, bool alpha_context, std::string &tmp) {
   int sel = arg & D3DTA_SELECTMASK;

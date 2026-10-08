@@ -29,7 +29,13 @@ const GUID IID_IDirectInputDevice8 = {0x54D41080, 0xDC15, 0x4833, {0xA4, 0x1B, 0
 
 namespace {
 
-std::recursive_mutex Lock;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::recursive_mutex &Lock_Instance() {
+  static std::recursive_mutex *instance = new std::recursive_mutex();
+  return *instance;
+}
+#define Lock Lock_Instance()
 DWORD Sequence = 0;
 
 enum class DeviceKind { Keyboard, Mouse };

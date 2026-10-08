@@ -510,8 +510,20 @@ struct ResEntry {
   const BYTE *data;
   DWORD size;
 };
-std::vector<BYTE> ResFile;
-std::vector<ResEntry> ResEntries;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::vector<BYTE> &ResFile_Instance() {
+  static std::vector<BYTE> *instance = new std::vector<BYTE>();
+  return *instance;
+}
+#define ResFile ResFile_Instance()
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::vector<ResEntry> &ResEntries_Instance() {
+  static std::vector<ResEntry> *instance = new std::vector<ResEntry>();
+  return *instance;
+}
+#define ResEntries ResEntries_Instance()
 bool ResLoaded = false;
 
 const BYTE *Read_Res_Name(const BYTE *p, const BYTE *end, bool &is_id, WORD &id, std::wstring &name) {

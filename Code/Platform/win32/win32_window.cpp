@@ -28,12 +28,36 @@ struct Window {
   HINSTANCE inst = nullptr;
 };
 
-std::recursive_mutex Lock;
-std::map<std::string, WNDCLASS> Classes;
-Window MainWindow;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::recursive_mutex &Lock_Instance() {
+  static std::recursive_mutex *instance = new std::recursive_mutex();
+  return *instance;
+}
+#define Lock Lock_Instance()
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::map<std::string, WNDCLASS> &Classes_Instance() {
+  static std::map<std::string, WNDCLASS> *instance = new std::map<std::string, WNDCLASS>();
+  return *instance;
+}
+#define Classes Classes_Instance()
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+Window &MainWindow_Instance() {
+  static Window *instance = new Window();
+  return *instance;
+}
+#define MainWindow MainWindow_Instance()
 bool MainWindowExists = false;
 HWND const MainHandle = (HWND)0x1000;
-std::deque<MSG> Queue;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::deque<MSG> &Queue_Instance() {
+  static std::deque<MSG> *instance = new std::deque<MSG>();
+  return *instance;
+}
+#define Queue Queue_Instance()
 bool QuitPosted = false;
 BYTE KeyState[256];
 POINT Cursor{0, 0};

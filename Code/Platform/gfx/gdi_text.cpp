@@ -69,7 +69,13 @@ struct Dc : GdiObject {
 };
 
 std::mutex Lock;
-std::vector<std::unique_ptr<FontFile>> Fonts;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::vector<std::unique_ptr<FontFile>> &Fonts_Instance() {
+  static std::vector<std::unique_ptr<FontFile>> *instance = new std::vector<std::unique_ptr<FontFile>>();
+  return *instance;
+}
+#define Fonts Fonts_Instance()
 bool FontsScanned = false;
 Dc ScreenDc;
 

@@ -279,13 +279,37 @@ struct Stream {
   bool released = false;
 };
 
-std::recursive_mutex Lock;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::recursive_mutex &Lock_Instance() {
+  static std::recursive_mutex *instance = new std::recursive_mutex();
+  return *instance;
+}
+#define Lock Lock_Instance()
 ALCdevice *Device = nullptr;
 ALCcontext *Context = nullptr;
 RebelAudioDriver Driver2D = {0, nullptr};
-std::set<Sample *> Samples;
-std::set<Stream *> Streams;
-std::map<CacheKey, CachedBuffer> Cache;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::set<Sample *> &Samples_Instance() {
+  static std::set<Sample *> *instance = new std::set<Sample *>();
+  return *instance;
+}
+#define Samples Samples_Instance()
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::set<Stream *> &Streams_Instance() {
+  static std::set<Stream *> *instance = new std::set<Stream *>();
+  return *instance;
+}
+#define Streams Streams_Instance()
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::map<CacheKey, CachedBuffer> &Cache_Instance() {
+  static std::map<CacheKey, CachedBuffer> *instance = new std::map<CacheKey, CachedBuffer>();
+  return *instance;
+}
+#define Cache Cache_Instance()
 size_t CacheBytes = 0;
 unsigned UseClock = 0;
 const size_t CacheLimit = 192u << 20;

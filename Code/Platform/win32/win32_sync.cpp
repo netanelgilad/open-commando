@@ -9,6 +9,7 @@
 #include "win32_handles.h"
 
 #include <cerrno>
+#include <cstdlib>
 #include <ctime>
 #include <pthread.h>
 #include <sched.h>
@@ -393,7 +394,9 @@ extern "C" void InitializeCriticalSection(LPCRITICAL_SECTION cs) {
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
   pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutex_t *m = new pthread_mutex_t;
+  // malloc, not new: the engine's global operator new (WWMemoryLog) takes a
+  // critical section itself, so allocating one with new would recurse.
+  pthread_mutex_t *m = static_cast<pthread_mutex_t *>(malloc(sizeof(pthread_mutex_t)));
   pthread_mutex_init(m, &attr);
   pthread_mutexattr_destroy(&attr);
   cs->impl = m;
@@ -405,7 +408,7 @@ extern "C" void DeleteCriticalSection(LPCRITICAL_SECTION cs) {
   pthread_mutex_t *m = static_cast<pthread_mutex_t *>(cs->impl);
   if (m) {
     pthread_mutex_destroy(m);
-    delete m;
+    free(m);
   }
   cs->impl = nullptr;
 }

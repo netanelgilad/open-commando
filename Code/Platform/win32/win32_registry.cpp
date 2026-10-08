@@ -37,8 +37,20 @@ struct NoCase {
 using ValueMap = std::map<std::string, Value, NoCase>;
 using KeyMap = std::map<std::string, ValueMap, NoCase>;
 
-std::recursive_mutex Lock;
-KeyMap Keys;
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+std::recursive_mutex &Lock_Instance() {
+  static std::recursive_mutex *instance = new std::recursive_mutex();
+  return *instance;
+}
+#define Lock Lock_Instance()
+// Built on first use: game code runs before main() (static constructors)
+// and may reach this before this file's globals are initialized.
+KeyMap &Keys_Instance() {
+  static KeyMap *instance = new KeyMap();
+  return *instance;
+}
+#define Keys Keys_Instance()
 bool Loaded = false;
 
 const char *Store_Path() {

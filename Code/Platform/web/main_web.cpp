@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -28,8 +29,14 @@ extern "C" void Rebel_Set_Command_Line(const char *cmd);
 
 int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
-  backend_t opfs = wasmfs_create_opfs_backend();
-  if (wasmfs_create_directory("/opfs", 0777, opfs) != 0) {
+  // The OPFS backend spawns its own proxy worker, which may not be started
+  // from the browser main thread: mount from a short-lived pthread.
+  int mount_result = -1;
+  std::thread([&] {
+    backend_t opfs = wasmfs_create_opfs_backend();
+    mount_result = wasmfs_create_directory("/opfs", 0777, opfs);
+  }).join();
+  if (mount_result != 0) {
     fprintf(stderr, "[rebel] could not mount OPFS; is this a secure context with cross-origin isolation?\n");
     return 1;
   }
