@@ -157,14 +157,58 @@ extern "C" void Rebel_Yield(DWORD ms) {
 #ifdef __EMSCRIPTEN__
 // Wait for the next display frame (vsync). Falls back to a short timer when
 // the tab is hidden, where requestAnimationFrame does not fire.
+// GPU time per frame (EXT_disjoint_timer_query_webgl2, where available) is
+// measured from one frame yield to the next and logged every 5 s as [gpu].
 EM_ASYNC_JS(void, Rebel_JS_Wait_Frame, (void), {
   if (Module.rebelFrame) Module.rebelFrame(); // page frame counter
+  var gl = (typeof GL !== 'undefined' && GL.currentContext) ? GL.currentContext.GLctx : null;
+  if (gl && !Module.rebelGpuTimer) {
+    Module.rebelGpuTimer = { ext: gl.getExtension('EXT_disjoint_timer_query_webgl2'), pending: [], cur: null, sum: 0, n: 0, max: 0, since: performance.now() };
+  }
+  var tq = Module.rebelGpuTimer;
+  if (gl && tq && tq.ext) {
+    if (tq.cur) { gl.endQuery(tq.ext.TIME_ELAPSED_EXT); tq.pending.push(tq.cur); tq.cur = null; }
+    while (tq.pending.length && gl.getQueryParameter(tq.pending[0], gl.QUERY_RESULT_AVAILABLE)) {
+      var q = tq.pending.shift();
+      if (!gl.getParameter(tq.ext.GPU_DISJOINT_EXT)) {
+        var ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+        tq.sum += ms; tq.n++; if (ms > tq.max) tq.max = ms;
+      }
+      gl.deleteQuery(q);
+    }
+    if (performance.now() - tq.since > 5000 && tq.n) {
+      console.log('[gpu] ' + (tq.sum / tq.n).toFixed(1) + ' ms/frame avg, max ' + tq.max.toFixed(1) + ' (' + tq.n + ' frames)');
+      Module.rebelGpuMs = tq.sum / tq.n;
+      tq.sum = 0; tq.n = 0; tq.max = 0; tq.since = performance.now();
+    }
+  }
+  // Pacing: the game paces itself to ~60 fps and yields with a zero-delay
+  // task instead of waiting for requestAnimationFrame. rAF follows the
+  // compositor's BeginFrame clock, which can tick far below the display
+  // rate (no physical display, remote sessions, busy compositor) and would
+  // cap the game there; the canvas still presents at the next composite.
+  // ?raf restores rAF pacing. Hidden tabs fall back to a 16 ms timer.
+  var now = performance.now();
+  var budget = 1000 / 60 - (now - (Module.rebelLastYield || 0));
   await new Promise(function(resolve) {
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible' && typeof requestAnimationFrame === 'function')
-      requestAnimationFrame(function() { resolve(); });
-    else
+    var visible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+    if (!visible)
       setTimeout(resolve, 16);
+    else if (Module.rebelUseRaf && typeof requestAnimationFrame === 'function')
+      requestAnimationFrame(function() { resolve(); });
+    else if (budget > 1)
+      setTimeout(resolve, budget);
+    else {
+      if (!Module.rebelYieldChannel) {
+        Module.rebelYieldChannel = new MessageChannel();
+        Module.rebelYieldChannel.port1.onmessage = function() { var r = Module.rebelYieldResolve; Module.rebelYieldResolve = null; if (r) r(); };
+      }
+      Module.rebelYieldResolve = resolve;
+      Module.rebelYieldChannel.port2.postMessage(0);
+    }
   });
+  Module.rebelLastYield = performance.now();
+  if (gl && tq && tq.ext && !tq.cur) { tq.cur = gl.createQuery(); gl.beginQuery(tq.ext.TIME_ELAPSED_EXT, tq.cur); }
 });
 #endif
 
@@ -175,9 +219,13 @@ extern "C" void Rebel_Audio_Update(void);
 // Requests queued by page hooks (debug_web.cpp); weak so tests link without it.
 extern "C" __attribute__((weak)) void Rebel_Run_Pending_Actions(void);
 
+extern "C" double Rebel_Stat_Audio_Ms = 0; // reported with the frame stats (d3d9_device.cpp)
+
 extern "C" void Rebel_Frame_Yield(void) {
 #ifdef __EMSCRIPTEN__
+  double t = emscripten_get_now();
   Rebel_Audio_Update();
+  Rebel_Stat_Audio_Ms += emscripten_get_now() - t;
   if (emscripten_has_asyncify() && emscripten_is_main_browser_thread())
     Rebel_JS_Wait_Frame();
 #endif

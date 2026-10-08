@@ -94,5 +94,6 @@ for (let round = 0; round < 3; round++) {
 await page.waitForTimeout(15000);
 await dump();
 clearInterval(skipper);
+clearInterval(watchdog);
 writeFileSync(`${outDir}/input-console.log`, lines.join('\n'));
 await ctx.close();

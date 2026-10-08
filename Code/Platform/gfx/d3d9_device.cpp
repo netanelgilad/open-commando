@@ -22,6 +22,7 @@
 extern "C" void Rebel_Frame_Yield(void);
 extern "C" unsigned Rebel_Stat_Sleep_Count; // win32_core.cpp
 extern "C" double Rebel_Stat_Sleep_Ms;
+extern "C" double Rebel_Stat_Audio_Ms;
 DWORD Rebel_Last_Frame_Yield = 0;
 
 namespace rebel_d3d {
@@ -438,9 +439,9 @@ HRESULT Device::Present(const RECT *, const RECT *, HWND, const void *) {
   if (now - LastReport > 5000.0) {
     fprintf(stderr,
             "[d3d9] frame %u: %.1f fps, %u draws, %u prims, %u clears, %u failed programs; work %.1f ms avg (max %.0f), "
-            "wait %.1f ms avg (max %.0f), %u sleeps %.0f ms; uploads: %u buffers %.1f MB, %u textures %.1f MB\n",
+            "wait %.1f ms avg (max %.0f, audio %.1f ms avg), %u sleeps %.0f ms; uploads: %u buffers %.1f MB, %u textures %.1f MB\n",
             FrameCount, frames * 1000.0 / (now - LastReport), DrawCalls, Primitives, Clears, FailedPrograms,
-            work_sum / frames, work_max, wait_sum / frames, wait_max, Rebel_Stat_Sleep_Count, Rebel_Stat_Sleep_Ms,
+            work_sum / frames, work_max, wait_sum / frames, wait_max, Rebel_Stat_Audio_Ms / frames, Rebel_Stat_Sleep_Count, Rebel_Stat_Sleep_Ms,
             Stat_Buffer_Uploads, Stat_Buffer_Bytes / 1048576.0, Stat_Texture_Uploads, Stat_Texture_Bytes / 1048576.0);
     Stat_Buffer_Bytes = Stat_Texture_Bytes = 0;
     Stat_Buffer_Uploads = Stat_Texture_Uploads = 0;
@@ -449,6 +450,7 @@ HRESULT Device::Present(const RECT *, const RECT *, HWND, const void *) {
     frames = 0;
     Rebel_Stat_Sleep_Count = 0;
     Rebel_Stat_Sleep_Ms = 0;
+    Rebel_Stat_Audio_Ms = 0;
     LastReport = now;
   }
 #endif

@@ -21,7 +21,11 @@ function flushLog() {
   logEl.textContent = text;
   logEl.scrollTop = logEl.scrollHeight;
 }
+// ?quiet: only tagged runtime lines ("[d3d9] ...") and errors reach the
+// console; the engine's debug chatter is dropped.
+const quietLog = params.has('quiet');
 function log(line) {
+  if (quietLog && line[0] !== '[' && !/MainMenuDialogClass|Assert|error/i.test(line)) return;
   console.log(line);
   if (!showLog) return;
   if (!pendingLog.length) requestAnimationFrame(flushLog);
@@ -38,7 +42,7 @@ function rebelFrameTick() {
   fpsLast = now;
   fpsFrames++;
   if (now - fpsSince >= 500) {
-    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms`;
+    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms` + (Module.rebelGpuMs ? `  ·  gpu ${Module.rebelGpuMs.toFixed(0)} ms` : "");
     fpsFrames = 0; fpsSince = now; fpsWorst = 0;
   }
 }
@@ -85,6 +89,7 @@ const WM = { KEYDOWN: 0x100, KEYUP: 0x101, CHAR: 0x102, SYSKEYDOWN: 0x104, SYSKE
 
 var Module = {
   rebelFrame: rebelFrameTick,
+  rebelUseRaf: params.has('raf'),
   canvas,
   arguments: (params.get('args') || '').split(' ').filter(Boolean),
   print: (t) => log(t),
