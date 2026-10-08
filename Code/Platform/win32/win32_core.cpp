@@ -365,12 +365,15 @@ extern "C" IDirect3D9 *Direct3DCreate9(UINT sdk_version);
 extern "C" HRESULT DirectInput8Create(HINSTANCE, DWORD, const GUID &, LPVOID *, void *);
 // Scripts library entry points (Scripts/DLLmain.cpp). Weak: tools and tests
 // that don't link the scripts still build; the game links them in full.
+// (extern "C", as SCRIPT_DLL_FUNCT declares them)
 class ScriptClass;
 class ScriptCommandsClass;
+extern "C" {
 __attribute__((weak)) ScriptClass *Create_Script(const char *name);
 __attribute__((weak)) void Destroy_Script(ScriptClass *script);
 __attribute__((weak)) bool Set_Script_Commands(ScriptCommandsClass *commands);
 __attribute__((weak)) void Set_Request_Destroy_Func(void (*function)(ScriptClass *));
+}
 namespace {
 struct BuiltinExport {
   const char *module;

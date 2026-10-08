@@ -42,6 +42,16 @@ for (let i = 1; i * 5 <= seconds; i++) {
   await page.waitForTimeout(5000);
   await page.screenshot({ path: `${outDir}/shot-${String(i * 5).padStart(3, '0')}s.png`, timeout: 120000 }).catch((e) => console.log(`${stamp()} screenshot failed (page busy?): ${e.message.split('\n')[0]}`));
   const status = await page.$eval('#status', (e) => e.textContent).catch(() => '');
+  if (i % 2 === 0) {
+    const probe = await Promise.race([
+      page.evaluate(() => {
+        const v = document.getElementById('movie');
+        return `movie=${v.style.display === 'block' ? v.currentSrc.split('/').pop() + '@' + v.currentTime.toFixed(1) + (v.error ? ' err' + v.error.code : '') : 'none'} canvas=${document.getElementById('canvas').width}x${document.getElementById('canvas').height}`;
+      }),
+      new Promise((r) => setTimeout(() => r('page unresponsive (main thread busy)'), 4000)),
+    ]);
+    console.log(`${stamp()} probe: ${probe}`);
+  }
   if (/stopped|failed/i.test(status)) { console.log(`${stamp()} status: ${status}`); break; }
 }
 writeFileSync(`${outDir}/console.log`, lines.join('\n'));

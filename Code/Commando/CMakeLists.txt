@@ -352,8 +352,17 @@ endif()
 if(REBEL_PORTABLE)
     # Browser entry point and link setup for the game.
     target_sources(Renegade PRIVATE ${PROJECT_SOURCE_DIR}/Code/Platform/web/main_web.cpp)
-    # Scripts register themselves with static constructors: keep every object.
-    target_link_options(Renegade PRIVATE "SHELL:-Wl,--whole-archive $<TARGET_FILE:Scripts> -Wl,--no-whole-archive")
+    # The engine relies on self-registering statics everywhere (persist and
+    # definition factories, save/load subsystems, network object factories,
+    # scripts). Objects reachable only through those registrations would be
+    # dropped from static libraries, so link every engine library in full.
+    set(REBEL_WHOLE_LIBS Scripts Combat WW3D2 WWPhys WWUi WWAudio WWNet WWSaveLoad WWTranslateDb WWLib WWMath
+                         WWDebug WWBitPack WWUtil BinkMovie SControl BandTest)
+    set(_whole "")
+    foreach(_lib ${REBEL_WHOLE_LIBS})
+        string(APPEND _whole " $<TARGET_FILE:${_lib}>")
+    endforeach()
+    target_link_options(Renegade PRIVATE "SHELL:-Wl,--whole-archive${_whole} -Wl,--no-whole-archive")
     target_link_options(Renegade PRIVATE
         -sWASMFS
         -sASYNCIFY
