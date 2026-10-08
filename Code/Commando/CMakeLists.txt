@@ -378,7 +378,7 @@ if(REBEL_PORTABLE)
         -sENVIRONMENT=web,worker
         -sINVOKE_RUN=0
         -sMODULARIZE=0
-        "SHELL:-sEXPORTED_FUNCTIONS=_main,_Rebel_Post_Message,_Rebel_Set_Screen_Size,_Rebel_Input_Key,_Rebel_Input_Mouse_Move,_Rebel_Input_Mouse_Wheel,_Rebel_Input_Mouse_Button,_Rebel_Input_Release_All,_Rebel_Audio_Update,_Rebel_Debug_Dump,_Rebel_Input_Set_Cursor,_malloc,_free"
+        "SHELL:-sEXPORTED_FUNCTIONS=_main,_Rebel_Post_Message,_Rebel_Set_Screen_Size,_Rebel_Input_Key,_Rebel_Input_Mouse_Move,_Rebel_Input_Mouse_Wheel,_Rebel_Input_Mouse_Button,_Rebel_Input_Release_All,_Rebel_Audio_Update,_Rebel_Debug_Dump,_Rebel_Input_Set_Cursor,_Rebel_Debug_Start_Campaign,_malloc,_free"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=callMain,ccall,cwrap,UTF8ToString,stringToUTF8,HEAPU16"
     )
     set_target_properties(Renegade PROPERTIES SUFFIX ".js" OUTPUT_NAME "renegade" OUTPUT_NAME_DEBUG "renegade" OUTPUT_NAME_RELWITHDEBINFO "renegade")
