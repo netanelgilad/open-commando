@@ -46,6 +46,7 @@ for (let i = 1; i * 5 <= seconds; i++) {
   if (i % 2 === 0) {
     const probe = await Promise.race([
       page.evaluate(() => {
+        try { Module._Rebel_Debug_Dump(); } catch (e) {}
         const v = document.getElementById('movie');
         return `movie=${v.style.display === 'block' ? v.currentSrc.split('/').pop() + '@' + v.currentTime.toFixed(1) + (v.error ? ' err' + v.error.code : '') : 'none'} canvas=${document.getElementById('canvas').width}x${document.getElementById('canvas').height}`;
       }),

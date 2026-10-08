@@ -209,6 +209,9 @@ void RenegadeDialogMgrClass::Do_Simple_Dialog(int dlg_res_id) {
 ////////////////////////////////////////////////////////////////
 void RenegadeDialogMgrClass::Goto_Location(LOCATION location) {
   WWMEMLOG(MEM_GAMEDATA);
+#ifdef REBEL_PORTABLE
+  WWDEBUG_SAY(("RenegadeDialogMgrClass::Goto_Location(%d)\n", (int)location));
+#endif
 
   switch (location) {
   case LOC_MAIN_MENU:

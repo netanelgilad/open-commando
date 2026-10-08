@@ -154,6 +154,10 @@ void DialogParserClass::Parse_Template(int res_id, int *dlg_width, int *dlg_heig
   HRSRC resource = ::FindResource(ProgramInstance, MAKEINTRESOURCE(res_id), RT_DIALOG);
   HGLOBAL hglobal = ::LoadResource(ProgramInstance, resource);
   LPVOID res_buffer = ::LockResource(hglobal);
+#ifdef REBEL_PORTABLE
+  WWDEBUG_SAY(("DialogParser: template %d %s (%lu bytes)\n", res_id, res_buffer ? "found" : "NOT FOUND",
+               (unsigned long)::SizeofResource(ProgramInstance, resource)));
+#endif
   if (res_buffer != NULL) {
 
     //

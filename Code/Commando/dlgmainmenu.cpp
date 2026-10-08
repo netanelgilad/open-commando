@@ -387,6 +387,9 @@ void MainMenuDialogClass::On_Command(int ctrl_id, int message_id, DWORD param) {
 //
 ////////////////////////////////////////////////////////////////
 void MainMenuDialogClass::Display(void) {
+#ifdef REBEL_PORTABLE
+  WWDEBUG_SAY(("MainMenuDialogClass::Display (instance %p, animated %d)\n", (void *)_TheInstance, (int)Animated));
+#endif
   //
   //	Create the dialog if necessary, otherwise simply bring it to the front
   //
@@ -417,6 +420,9 @@ void MainMenuDialogClass::Display(void) {
     //	Start the dialog
     //
     dialog->Start_Dialog();
+#ifdef REBEL_PORTABLE
+    WWDEBUG_SAY(("MainMenuDialogClass: started, active dialog %p\n", (void *)DialogMgrClass::Get_Active_Dialog()));
+#endif
     REF_PTR_RELEASE(dialog);
 
   } else {

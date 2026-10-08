@@ -118,6 +118,8 @@ extern "C" HWND Rebel_Main_Window(void) { return MainWindowExists ? MainHandle :
 
 /* ------------------------------------------------------------ class/window */
 
+static void Activate_Main_Window(HWND w);
+
 extern "C" ATOM RegisterClassA(const WNDCLASS *wc) {
   std::lock_guard<std::recursive_mutex> g(Lock);
   Classes[wc->lpszClassName ? wc->lpszClassName : ""] = *wc;
@@ -178,6 +180,8 @@ extern "C" HWND CreateWindowExA(DWORD exstyle, LPCSTR cls, LPCSTR name, DWORD st
     MainWindowExists = false;
     return nullptr;
   }
+  if (style & WS_VISIBLE)
+    Activate_Main_Window(MainHandle);
   return MainHandle;
 }
 
@@ -192,12 +196,28 @@ extern "C" BOOL DestroyWindow(HWND w) {
   return TRUE;
 }
 
+// Windows activates a top-level window when it is first shown and sends the
+// activation messages synchronously; the game only renders once it has seen
+// WM_ACTIVATEAPP (GameInFocus). The page later reports real focus changes.
+static bool Activated = false;
+static void Activate_Main_Window(HWND w) {
+  Window *win = Get(w);
+  if (!win || !win->proc || Activated)
+    return;
+  Activated = true;
+  win->proc(w, WM_ACTIVATEAPP, TRUE, 0);
+  win->proc(w, WM_ACTIVATE, WA_ACTIVE, 0);
+  win->proc(w, WM_SETFOCUS, 0, 0);
+}
+
 extern "C" BOOL ShowWindow(HWND w, int cmd) {
   Window *win = Get(w);
   if (!win)
     return FALSE;
   BOOL was = win->visible;
   win->visible = cmd != SW_HIDE && cmd != SW_MINIMIZE;
+  if (win->visible)
+    Activate_Main_Window(w);
   return was;
 }
 
@@ -210,7 +230,12 @@ extern "C" HWND SetFocus(HWND w) {
 extern "C" HWND GetFocus(void) { return Focus; }
 extern "C" HWND GetActiveWindow(void) { return Rebel_Main_Window(); }
 extern "C" HWND GetForegroundWindow(void) { return Rebel_Main_Window(); }
-extern "C" BOOL SetForegroundWindow(HWND w) { return Get(w) != nullptr; }
+extern "C" BOOL SetForegroundWindow(HWND w) {
+  if (!Get(w))
+    return FALSE;
+  Activate_Main_Window(w);
+  return TRUE;
+}
 extern "C" HWND SetActiveWindow(HWND w) { return w; }
 extern "C" BOOL IsWindow(HWND w) { return Get(w) != nullptr; }
 extern "C" BOOL IsWindowVisible(HWND w) {
