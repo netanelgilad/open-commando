@@ -61,7 +61,12 @@ var Module = {
   printErr: (t) => log(t),
   locateFile: (p) => p,
   setStatus: (t) => { if (t) log('[emscripten] ' + t); },
-  onAbort: (what) => { overlay.style.display = 'flex'; setStatus('The game stopped: ' + what + '\nAdd ?log to the URL for details.'); },
+  onAbort: (what) => {
+    // Emscripten hands us the original error object: keep its wasm stack.
+    if (what && what.stack) log('[abort] ' + what.stack);
+    overlay.style.display = 'flex';
+    setStatus('The game stopped: ' + what + '\nAdd ?log to the URL for details.');
+  },
 };
 window.Module = Module;
 

@@ -366,7 +366,15 @@ static void Maybe_Yield_To_Browser() {
   }
 }
 
+extern "C" void Rebel_After_Frame(void);
+
 extern "C" BOOL PeekMessageA(LPMSG msg, HWND w, UINT min, UINT max, UINT remove) {
+  static bool running_actions = false;
+  if (!running_actions) {
+    running_actions = true;
+    Rebel_After_Frame(); // queued page requests (debug hooks)
+    running_actions = false;
+  }
   bool empty;
   {
     std::lock_guard<std::recursive_mutex> g(Lock);

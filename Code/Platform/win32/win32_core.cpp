@@ -164,12 +164,22 @@ extern "C" void Rebel_Audio_Update(void);
 
 // Called once per presented frame: the one place the game hands the browser
 // a turn (show the frame, deliver input, run timers and audio).
+// Requests queued by page hooks (debug_web.cpp); weak so tests link without it.
+extern "C" __attribute__((weak)) void Rebel_Run_Pending_Actions(void);
+
 extern "C" void Rebel_Frame_Yield(void) {
 #ifdef __EMSCRIPTEN__
   Rebel_Audio_Update();
   if (emscripten_has_asyncify() && emscripten_is_main_browser_thread())
     Rebel_JS_Wait_Frame();
 #endif
+}
+
+// Called from the main loop's message pump (PeekMessage): a point on the
+// game's own stack, outside rendering, where queued page requests can run.
+extern "C" void Rebel_After_Frame(void) {
+  if (Rebel_Run_Pending_Actions)
+    Rebel_Run_Pending_Actions();
 }
 
 extern "C" void Sleep(DWORD ms) {
