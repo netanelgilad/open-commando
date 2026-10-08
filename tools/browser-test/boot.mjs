@@ -35,10 +35,12 @@ try {
   process.exit(1);
 }
 console.log(`${stamp()} ready, clicking Play`);
-await page.click('#start');
+// Start asynchronously: callMain runs on the page's main thread until the
+// game's first yield, which can outlast Playwright's click timeout.
+await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
 for (let i = 1; i * 5 <= seconds; i++) {
   await page.waitForTimeout(5000);
-  await page.screenshot({ path: `${outDir}/shot-${String(i * 5).padStart(3, '0')}s.png` });
+  await page.screenshot({ path: `${outDir}/shot-${String(i * 5).padStart(3, '0')}s.png`, timeout: 120000 }).catch((e) => console.log(`${stamp()} screenshot failed (page busy?): ${e.message.split('\n')[0]}`));
   const status = await page.$eval('#status', (e) => e.textContent).catch(() => '');
   if (/stopped|failed/i.test(status)) { console.log(`${stamp()} status: ${status}`); break; }
 }

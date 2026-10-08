@@ -402,4 +402,60 @@ private:
   case (id):                                                                                                           \
     break;
 
+
+#ifdef REBEL_PORTABLE
+/*
+** Wide strings on disk are UTF-16 (Windows WCHAR); in memory WCHAR is the
+** 4-byte wchar_t of the web build. These helpers convert at the chunk
+** boundary so file formats stay byte-identical to the Windows game.
+*/
+#include <vector>
+template <class CLOAD, class WSTR> inline void Rebel_Read_UTF16(CLOAD &cload, WSTR &var, unsigned bytes) {
+  std::vector<unsigned short> tmp(bytes / 2 + 1, 0);
+  cload.Read(tmp.data(), bytes);
+  unsigned n = bytes / 2;
+  unsigned len = 0;
+  while (len < n && tmp[len])
+    len++;
+  WCHAR *out = var.Get_Buffer(len + 1);
+  for (unsigned i = 0; i < len; i++)
+    out[i] = (WCHAR)tmp[i];
+  out[len] = 0;
+}
+template <class CSAVE, class WSTR> inline void Rebel_Write_UTF16(CSAVE &csave, const WSTR &var) {
+  int len = var.Get_Length();
+  const WCHAR *src = (const WCHAR *)var;
+  std::vector<unsigned short> tmp(len + 1, 0);
+  for (int i = 0; i < len; i++)
+    tmp[i] = (unsigned)src[i] > 0xFFFF ? (unsigned short)'?' : (unsigned short)src[i];
+  csave.Write(tmp.data(), (len + 1) * 2);
+}
+#undef WRITE_WIDESTRING_CHUNK
+#define WRITE_WIDESTRING_CHUNK(csave, id, var)                                                                         \
+  {                                                                                                                    \
+    csave.Begin_Chunk(id);                                                                                             \
+    Rebel_Write_UTF16(csave, var);                                                                                     \
+    csave.End_Chunk();                                                                                                 \
+  }
+#undef WRITE_MICRO_CHUNK_WIDESTRING
+#define WRITE_MICRO_CHUNK_WIDESTRING(csave, id, var)                                                                   \
+  {                                                                                                                    \
+    csave.Begin_Micro_Chunk(id);                                                                                       \
+    Rebel_Write_UTF16(csave, var);                                                                                     \
+    csave.End_Micro_Chunk();                                                                                           \
+  }
+#undef READ_WIDESTRING_CHUNK
+#define READ_WIDESTRING_CHUNK(cload, id, var)                                                                          \
+  case (id):                                                                                                           \
+    Rebel_Read_UTF16(cload, var, cload.Cur_Chunk_Length());                                                            \
+    break;
+#undef READ_MICRO_CHUNK_WIDESTRING
+#define READ_MICRO_CHUNK_WIDESTRING(cload, id, var)                                                                    \
+  case (id):                                                                                                           \
+    Rebel_Read_UTF16(cload, var, cload.Cur_Micro_Chunk_Length());                                                      \
+    break;
+#undef LOAD_MICRO_CHUNK_WIDESTRING
+#define LOAD_MICRO_CHUNK_WIDESTRING(cload, var) Rebel_Read_UTF16(cload, var, cload.Cur_Micro_Chunk_Length());
+#endif // REBEL_PORTABLE
+
 #endif CHUNKIO_H

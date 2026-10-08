@@ -78,8 +78,20 @@ void ThreadClass::Execute() {
                      // assert(0);
   return;
 #else
+#ifdef REBEL_PORTABLE
+  // WebAssembly checks call signatures: adapt void(void*) to the DWORD(void*)
+  // start routine instead of casting the function pointer.
+  handle = reinterpret_cast<unsigned long>(CreateThread(
+      nullptr, 0,
+      [](LPVOID params) -> DWORD {
+        Internal_Thread_Function(params);
+        return 0;
+      },
+      this, 0, nullptr));
+#else
   handle = reinterpret_cast<unsigned long>(
       CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(Internal_Thread_Function), this, 0, nullptr));
+#endif
   SetThreadPriority((HANDLE)handle, THREAD_PRIORITY_NORMAL + thread_priority);
   WWDEBUG_SAY(("ThreadClass::Execute: Started thread %s, thread ID is %X\n", ThreadName, handle));
 #endif

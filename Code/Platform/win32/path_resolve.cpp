@@ -19,7 +19,10 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <map>
+#include <mutex>
 #include <string>
+#include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -50,20 +53,46 @@ static bool Needs_Work(const char *path) {
   return __real_stat(path, &st) != 0;
 }
 
+// Directory listings are cached (each listing is a round trip to OPFS) and
+// dropped whenever anything is created, removed or renamed.
+static std::mutex &Cache_Lock() {
+  static std::mutex *m = new std::mutex();
+  return *m;
+}
+static std::map<std::string, std::vector<std::string>> &Dir_Cache() {
+  static auto *c = new std::map<std::string, std::vector<std::string>>();
+  return *c;
+}
+static void Invalidate_Dir_Cache() {
+  std::lock_guard<std::mutex> g(Cache_Lock());
+  Dir_Cache().clear();
+}
+
 static bool Match_Component(const std::string &dir, const std::string &name, std::string &out) {
-  DIR *d = __real_opendir(dir.empty() ? "." : dir.c_str());
-  if (!d)
-    return false;
-  bool found = false;
-  while (dirent *e = readdir(d)) {
-    if (strcasecmp(e->d_name, name.c_str()) == 0) {
-      out = e->d_name;
-      found = true;
-      break;
-    }
+  std::string key = dir.empty() ? "." : dir;
+  std::vector<std::string> names;
+  {
+    std::lock_guard<std::mutex> g(Cache_Lock());
+    auto it = Dir_Cache().find(key);
+    if (it != Dir_Cache().end())
+      names = it->second;
   }
-  closedir(d);
-  return found;
+  if (names.empty()) {
+    DIR *d = __real_opendir(key.c_str());
+    if (!d)
+      return false;
+    while (dirent *e = readdir(d))
+      names.push_back(e->d_name);
+    closedir(d);
+    std::lock_guard<std::mutex> g(Cache_Lock());
+    Dir_Cache()[key] = names;
+  }
+  for (const std::string &n : names)
+    if (strcasecmp(n.c_str(), name.c_str()) == 0) {
+      out = n;
+      return true;
+    }
+  return false;
 }
 
 std::string Rebel_Resolve_Path(const char *path) {
@@ -110,7 +139,12 @@ std::string Rebel_Resolve_Path(const char *path) {
 
 extern "C" {
 
-FILE *__wrap_fopen(const char *path, const char *mode) { return __real_fopen(Rebel_Resolve_Path(path).c_str(), mode); }
+FILE *__wrap_fopen(const char *path, const char *mode) {
+  FILE *f = __real_fopen(Rebel_Resolve_Path(path).c_str(), mode);
+  if (mode && (strchr(mode, 'w') || strchr(mode, 'a')))
+    Invalidate_Dir_Cache();
+  return f;
+}
 FILE *__wrap_freopen(const char *path, const char *mode, FILE *f) {
   return __real_freopen(path ? Rebel_Resolve_Path(path).c_str() : nullptr, mode, f);
 }
@@ -122,18 +156,35 @@ int __wrap_open(const char *path, int flags, ...) {
     mode = va_arg(ap, int);
     va_end(ap);
   }
-  return __real_open(Rebel_Resolve_Path(path).c_str(), flags, mode);
+  int fd = __real_open(Rebel_Resolve_Path(path).c_str(), flags, mode);
+  if (flags & O_CREAT)
+    Invalidate_Dir_Cache();
+  return fd;
 }
 int __wrap_stat(const char *path, struct stat *st) { return __real_stat(Rebel_Resolve_Path(path).c_str(), st); }
 int __wrap_lstat(const char *path, struct stat *st) { return __real_lstat(Rebel_Resolve_Path(path).c_str(), st); }
 int __wrap_access(const char *path, int mode) { return __real_access(Rebel_Resolve_Path(path).c_str(), mode); }
 DIR *__wrap_opendir(const char *path) { return __real_opendir(Rebel_Resolve_Path(path).c_str()); }
-int __wrap_mkdir(const char *path, mode_t mode) { return __real_mkdir(Rebel_Resolve_Path(path).c_str(), mode); }
-int __wrap_rmdir(const char *path) { return __real_rmdir(Rebel_Resolve_Path(path).c_str()); }
-int __wrap_unlink(const char *path) { return __real_unlink(Rebel_Resolve_Path(path).c_str()); }
-int __wrap_remove(const char *path) { return __real_remove(Rebel_Resolve_Path(path).c_str()); }
+int __wrap_mkdir(const char *path, mode_t mode) { int r = __real_mkdir(Rebel_Resolve_Path(path).c_str(), mode);
+  Invalidate_Dir_Cache();
+  return r;
+}
+int __wrap_rmdir(const char *path) { int r = __real_rmdir(Rebel_Resolve_Path(path).c_str());
+  Invalidate_Dir_Cache();
+  return r;
+}
+int __wrap_unlink(const char *path) { int r = __real_unlink(Rebel_Resolve_Path(path).c_str());
+  Invalidate_Dir_Cache();
+  return r;
+}
+int __wrap_remove(const char *path) { int r = __real_remove(Rebel_Resolve_Path(path).c_str());
+  Invalidate_Dir_Cache();
+  return r;
+}
 int __wrap_rename(const char *a, const char *b) {
-  return __real_rename(Rebel_Resolve_Path(a).c_str(), Rebel_Resolve_Path(b).c_str());
+  int r = __real_rename(Rebel_Resolve_Path(a).c_str(), Rebel_Resolve_Path(b).c_str());
+  Invalidate_Dir_Cache();
+  return r;
 }
 int __wrap_chdir(const char *path) { return __real_chdir(Rebel_Resolve_Path(path).c_str()); }
 int __wrap_truncate(const char *path, off_t len) { return __real_truncate(Rebel_Resolve_Path(path).c_str(), len); }

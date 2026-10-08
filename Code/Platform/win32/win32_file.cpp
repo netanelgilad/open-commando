@@ -15,12 +15,22 @@
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <algorithm>
 #include <vector>
 
 namespace {
 
 struct FileObject : RebelHandle {
   int fd = -1;
+  // Read-only handles read through a window buffer: the engine issues many
+  // tiny reads, and each syscall is a round trip to the OPFS worker.
+  bool read_only = false;
+  long long pos = 0;      // logical file position (read-only handles)
+  long long size = 0;
+  std::vector<char> window;
+  long long window_start = 0;
+  size_t window_len = 0;
+  static constexpr size_t WINDOW = 256 * 1024;
   FileObject() : RebelHandle(Kind::File) {}
   void Close() override {
     if (fd >= 0)
@@ -108,6 +118,11 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD, LPSECURITY_ATTRI
   }
   FileObject *f = new FileObject();
   f->fd = fd;
+  if ((flags & O_ACCMODE) == O_RDONLY) {
+    f->read_only = true;
+    struct stat fst;
+    f->size = fstat(fd, &fst) == 0 ? (long long)fst.st_size : 0;
+  }
   SetLastError(ERROR_SUCCESS);
   return f;
 }
@@ -119,6 +134,40 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read_out, LPOVER
   if (!f) {
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
+  }
+  if (f->read_only) {
+    char *out = (char *)buf;
+    size_t total = 0;
+    while (total < n && f->pos < f->size) {
+      if (f->pos >= f->window_start && f->pos < f->window_start + (long long)f->window_len) {
+        size_t off = (size_t)(f->pos - f->window_start);
+        size_t take = std::min(n - total, f->window_len - off);
+        memcpy(out + total, f->window.data() + off, take);
+        total += take;
+        f->pos += (long long)take;
+        continue;
+      }
+      size_t want = n - total;
+      if (want >= FileObject::WINDOW) { // big read: straight into the caller's buffer
+        ssize_t r = ::pread(f->fd, out + total, want, (off_t)f->pos);
+        if (r <= 0)
+          break;
+        total += (size_t)r;
+        f->pos += r;
+        continue;
+      }
+      f->window.resize(FileObject::WINDOW);
+      ssize_t r = ::pread(f->fd, f->window.data(), FileObject::WINDOW, (off_t)f->pos);
+      if (r <= 0) {
+        f->window_len = 0;
+        break;
+      }
+      f->window_start = f->pos;
+      f->window_len = (size_t)r;
+    }
+    if (read_out)
+      *read_out = (DWORD)total;
+    return TRUE;
   }
   size_t total = 0;
   while (total < n) {
@@ -170,6 +219,19 @@ extern "C" DWORD SetFilePointer(HANDLE h, LONG dist, PLONG disthigh, DWORD metho
   }
   long long off = disthigh ? (((long long)*disthigh) << 32) | (unsigned long)dist : (long long)dist;
   int whence = method == FILE_CURRENT ? SEEK_CUR : (method == FILE_END ? SEEK_END : SEEK_SET);
+  if (f->read_only) {
+    long long base = method == FILE_CURRENT ? f->pos : (method == FILE_END ? f->size : 0);
+    long long np = base + off;
+    if (np < 0) {
+      SetLastError(87);
+      return INVALID_SET_FILE_POINTER;
+    }
+    f->pos = np;
+    if (disthigh)
+      *disthigh = (LONG)((unsigned long long)np >> 32);
+    SetLastError(ERROR_SUCCESS);
+    return (DWORD)np;
+  }
   off_t pos = ::lseek(f->fd, (off_t)off, whence);
   if (pos < 0) {
     Fail_Errno();

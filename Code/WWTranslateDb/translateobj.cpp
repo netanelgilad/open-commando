@@ -178,7 +178,11 @@ bool TDBObjClass::Load(ChunkLoadClass &cload) {
       //	Load the translated string from its chunk
       //
       WideStringClass string;
+      #ifdef REBEL_PORTABLE
+      Rebel_Read_UTF16(cload, string, cload.Cur_Chunk_Length());
+#else
       cload.Read(string.Get_Buffer((cload.Cur_Chunk_Length() + 1) / 2), cload.Cur_Chunk_Length());
+#endif
 
       //
       //	Add the translated string to our list
@@ -237,7 +241,11 @@ void TDBObjClass::Load_Variables(ChunkLoadClass &cload) {
       //	Load the translated string from its chunk
       //
       WideStringClass string;
+      #ifdef REBEL_PORTABLE
+      Rebel_Read_UTF16(cload, string, cload.Cur_Micro_Chunk_Length());
+#else
       cload.Read(string.Get_Buffer((cload.Cur_Micro_Chunk_Length() + 1) / 2), cload.Cur_Micro_Chunk_Length());
+#endif
 
       //
       //	Add the translated string to our list

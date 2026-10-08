@@ -32,3 +32,7 @@ target_link_options(rebel_mix_smoke PRIVATE -lnodefs.js -sALLOW_MEMORY_GROWTH=1 
 add_executable(rebel_audio_smoke tests/audio_smoke.cpp)
 target_link_libraries(rebel_audio_smoke PRIVATE WWLib WWDebug RebelPlatform)
 target_link_options(rebel_audio_smoke PRIVATE -lnodefs.js -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1 -sENVIRONMENT=node,worker)
+add_executable(rebel_tdb_smoke tests/tdb_smoke.cpp)
+target_link_libraries(rebel_tdb_smoke PRIVATE WWTranslateDb WWSaveLoad WWLib WWDebug WWMath RebelPlatform)
+target_include_directories(rebel_tdb_smoke PRIVATE ${PROJECT_SOURCE_DIR}/Code/WWTranslateDb ${PROJECT_SOURCE_DIR}/Code/WWSaveLoad ${PROJECT_SOURCE_DIR}/Code/WWMath)
+target_link_options(rebel_tdb_smoke PRIVATE -lnodefs.js -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1 -sENVIRONMENT=node,worker)

@@ -606,6 +606,10 @@ bool Game_Init() {
     file->Close(); // Close the file
     _TheFileFactory->Return_File(file);
   }
+#ifdef REBEL_PORTABLE
+  WWDEBUG_SAY(("Strings: file %s, loaded %d, %d objects, version %u\n", file ? "found" : "NOT FOUND",
+               TranslateDBClass::Is_Loaded(), TranslateDBClass::Get_Object_Count(), TranslateDBClass::Get_Version_Number()));
+#endif
   // TranslateDBClass::Set_Current_Language (TranslateDBClass::LANGID_CHINESE);
 
   //

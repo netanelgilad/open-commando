@@ -26,6 +26,14 @@ where the shortcut lives and what "done" looks like.
   does nothing.
 - **Frame grabber** (AVI movie capture, developer tool) is inert.
 
+## Text encoding
+
+- **WCHAR is 4 bytes in memory, 2 on disk/wire.** UTF-16 is converted at the
+  chunk macros (`WWLib/chunkio.h`), translation objects, registry and
+  `BitStreamClass` wide chars. Any other place that reads/writes raw WCHAR
+  bytes (none found yet) would need the same treatment. Characters outside
+  the BMP are written as '?'.
+
 ## Networking
 
 - **Westwood Online / GameSpy** code paths are excluded (`connect.cpp`,

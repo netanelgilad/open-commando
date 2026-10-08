@@ -120,7 +120,12 @@ public:
   void Add(char val, int type = NO_ENCODER) { Internal_Add(val, type); }
   void Add(int val, int type = NO_ENCODER) { Internal_Add(val, type); }
   void Add(float val, int type = NO_ENCODER) { Internal_Add(val, type); }
+#ifdef REBEL_PORTABLE
+  // Keep the Windows wire format: WCHAR travels as 16 bits.
+  void Add(wchar_t val, int type = NO_ENCODER) { Internal_Add((unsigned short)val, type); }
+#else
   void Add(wchar_t val, int type = NO_ENCODER) { Internal_Add(val, type); }
+#endif
 
   BYTE Get(BYTE &set_val, int type = NO_ENCODER) { return Internal_Get(set_val, type); }
   USHORT Get(USHORT &set_val, int type = NO_ENCODER) { return Internal_Get(set_val, type); }
@@ -129,7 +134,15 @@ public:
   char Get(char &set_val, int type = NO_ENCODER) { return Internal_Get(set_val, type); }
   int Get(int &set_val, int type = NO_ENCODER) { return Internal_Get(set_val, type); }
   float Get(float &set_val, int type = NO_ENCODER) { return Internal_Get(set_val, type); }
+#ifdef REBEL_PORTABLE
+  wchar_t Get(wchar_t &set_val, int type = NO_ENCODER) {
+    unsigned short v = 0;
+    Internal_Get(v, type);
+    return set_val = (wchar_t)v;
+  }
+#else
   wchar_t Get(wchar_t &set_val, int type = NO_ENCODER) { return Internal_Get(set_val, type); }
+#endif
 
 private:
   //
