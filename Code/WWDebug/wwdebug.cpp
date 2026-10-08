@@ -287,7 +287,7 @@ void WWDebug_Assert_Fail(const char *expr, const char *file, int line) {
 
     if (code == IDRETRY) {
 #ifdef REBEL_PORTABLE
-      __builtin_debugtrap();
+      Rebel_Debug_Break();
 #else
       _asm int 3;
 #endif

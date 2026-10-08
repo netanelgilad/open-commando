@@ -70,11 +70,16 @@ extern "C" void OutputDebugStringW(LPCWSTR s) {
     fprintf(stderr, "%ls", s);
 }
 
-extern "C" void DebugBreak(void) {
+extern "C" void Rebel_Debug_Break(void) {
 #ifdef __EMSCRIPTEN__
-  EM_ASM({ debugger; });
+  char stack[4096];
+  emscripten_get_callstack(EM_LOG_C_STACK | EM_LOG_NO_PATHS, stack, sizeof(stack));
+  fprintf(stderr, "[debug break, continuing]\n%s\n", stack);
+  EM_ASM({ debugger; }); // pauses only when devtools are open
 #endif
 }
+
+extern "C" void DebugBreak(void) { Rebel_Debug_Break(); }
 
 extern "C" BOOL IsDebuggerPresent(void) { return FALSE; }
 

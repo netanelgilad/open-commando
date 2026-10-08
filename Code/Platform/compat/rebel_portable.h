@@ -48,6 +48,7 @@
 #define _cdecl
 #define _stdcall
 #define __forceinline inline __attribute__((always_inline))
+#define __debugbreak() Rebel_Debug_Break()
 #define __declspec(x)
 
 /* SAL annotations are documentation-only. */
@@ -107,6 +108,9 @@ char *_i64toa(long long value, char *buf, int radix);
 void _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext);
 void _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext);
 char *_fullpath(char *abs, const char *rel, size_t max);
+/* Debugger breaks log a stack trace and continue ("Ignore") instead of
+** trapping: a wasm trap would end the program on every assertion. */
+void Rebel_Debug_Break(void);
 int _wtoi(const wchar_t *s);
 long _wtol(const wchar_t *s);
 /* Multibyte helpers: the ANSI code page here is single-byte (1252). */

@@ -2264,7 +2264,7 @@ public:
   virtual void Activate(const char *input) {
     Print("Breaking execution on demand.\n");
 #ifdef REBEL_PORTABLE
-    __builtin_debugtrap();
+    Rebel_Debug_Break();
 #else
     _asm int 0x03;
 #endif
