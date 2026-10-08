@@ -104,7 +104,10 @@ function installInput() {
     if (!running) return;
     canvas.focus();
     if (!document.pointerLockElement && !params.has('nolock')) canvas.requestPointerLock?.();
-    [mouseX, mouseY] = document.pointerLockElement ? [mouseX, mouseY] : canvasPoint(e);
+    if (!document.pointerLockElement) {
+      [mouseX, mouseY] = canvasPoint(e);
+      Module._Rebel_Input_Set_Cursor(mouseX, mouseY);
+    }
     const b = e.button === 2 ? 1 : e.button === 1 ? 2 : 0;
     Module._Rebel_Input_Mouse_Button(b, 1);
     post([WM.LBUTTONDOWN, WM.MBUTTONDOWN, WM.RBUTTONDOWN][e.button] || WM.LBUTTONDOWN, 1 << b, lparamXY(mouseX, mouseY));
@@ -122,9 +125,9 @@ function installInput() {
       mouseX = Math.max(0, Math.min(canvas.width - 1, mouseX + e.movementX));
       mouseY = Math.max(0, Math.min(canvas.height - 1, mouseY + e.movementY));
     } else {
-      const [x, y] = canvasPoint(e);
-      Module._Rebel_Input_Mouse_Move(x - mouseX, y - mouseY);
-      mouseX = x; mouseY = y;
+      // Free pointer (menus): place the game cursor exactly under the mouse.
+      [mouseX, mouseY] = canvasPoint(e);
+      Module._Rebel_Input_Set_Cursor(mouseX, mouseY);
     }
     post(WM.MOUSEMOVE, 0, lparamXY(mouseX, mouseY));
   });
