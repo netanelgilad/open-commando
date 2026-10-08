@@ -293,7 +293,9 @@ WWINLINE long WWMath::Float_To_Long(float f) {
   return i;
 }
 #else
-WWINLINE long WWMath::Float_To_Long(float f) { return (long)f; }
+// fistp rounds to nearest (even) in the default FPU mode; a cast would
+// truncate and shift callers that rely on rounding (e.g. HRawAnim frames).
+WWINLINE long WWMath::Float_To_Long(float f) { return lrintf(f); }
 #endif
 
 WWINLINE long WWMath::Float_To_Long(double f) {
@@ -306,7 +308,7 @@ WWINLINE long WWMath::Float_To_Long(double f) {
   return retval;
 
 #else
-  return (long)f;
+  return lrint(f); // round to nearest, like fistp
 #endif
 }
 

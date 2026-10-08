@@ -226,7 +226,17 @@ extern "C" BOOL GetExitCodeThread(HANDLE h, LPDWORD code) {
 
 extern "C" BOOL SetThreadPriority(HANDLE, int) { return TRUE; }
 extern "C" int GetThreadPriority(HANDLE) { return THREAD_PRIORITY_NORMAL; }
-extern "C" void ExitThread(DWORD code) { pthread_exit((void *)(ULONG_PTR)code); }
+extern "C" void ExitThread(DWORD code) {
+#ifdef __EMSCRIPTEN__
+  // Ending the browser main thread would end the program (the game asks for
+  // this on asserts via cDevOptions::ExitThreadOnAssert): ignore it there.
+  if (emscripten_is_main_browser_thread()) {
+    fprintf(stderr, "[win32] ExitThread(%lu) on the main thread ignored\n", (unsigned long)code);
+    return;
+  }
+#endif
+  pthread_exit((void *)(ULONG_PTR)code);
+}
 
 extern "C" DWORD GetCurrentThreadId(void) {
 #ifdef __EMSCRIPTEN__
