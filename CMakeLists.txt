@@ -34,6 +34,9 @@ if(REBEL_PORTABLE)
     # game links with ASYNCIFY, which does not support wasm exception handling.
     add_link_options(-pthread)
     add_compile_options(-Wno-everything -fms-extensions -fno-delayed-template-parsing)
+    # MSVC passes class objects through "..." bitwise; clang compiles that to a
+    # runtime trap (e.g. data-safe floats in DIAG_LOG). Make it a build error.
+    add_compile_options(-Werror=non-pod-varargs)
     # Windows system / proprietary SDK libraries become empty targets; the
     # replacements are compiled into RebelPlatform instead.
     foreach(_lib dinput8 imagehlp odbc32 odbccp32 shlwapi version vfw32 Vfw32 winmm ws2_32)

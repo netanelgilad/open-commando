@@ -4051,7 +4051,7 @@ DECLARE_SCRIPT(M05_Dump_Captives, "") {
       Commands->Select_Weapon(obj, "Weapon_Chaingun_AI");
 
       Vector3 curr_loc = Commands->Get_Position(obj);
-      Commands->Debug_Message("Current Location: %d", curr_loc);
+      Commands->Debug_Message("Current Location: %f %f %f", curr_loc.X, curr_loc.Y, curr_loc.Z);
       Vector3 go_loc = Get_Circle_Position(obj, obj, 5.0f, 0.0f);
       params.Set_Basic(this, INNATE_PRIORITY_ENEMY_SEEN + 5, GO_POWERUPS);
       params.Set_Movement(go_loc, RUN, 0.5f);

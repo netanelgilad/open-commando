@@ -1241,7 +1241,7 @@ void DX8SkinFVFCategoryContainer::Render(void) {
   }
   WWASSERT(vertex_offset == VisibleVertexCount);
 
-  SNAPSHOT_SAY(("Set vb: %x ib: %x\n", vb, index_buffer));
+  SNAPSHOT_SAY(("Set vb: %p ib: %p\n", (void *)&vb, (void *)index_buffer));
 
   DX8Wrapper::Set_Vertex_Buffer(vb);
   DX8Wrapper::Set_Index_Buffer(index_buffer, 0);
@@ -1484,7 +1484,7 @@ void DX8TextureCategoryClass::Render(void) {
   SNAPSHOT_SAY(("Set_Material(%s)\n", Peek_Material() ? Peek_Material()->Get_Name() : "NULL"));
   DX8Wrapper::Set_Material(Peek_Material());
 
-  SNAPSHOT_SAY(("Set_Shader(0x%x)\n", Get_Shader()));
+  SNAPSHOT_SAY(("Set_Shader(0x%x)\n", Get_Shader().Get_Bits()));
   DX8Wrapper::Set_Shader(Get_Shader());
 
   PolyRenderTaskClass *prt = render_task_head;

@@ -17,10 +17,44 @@ page.on('console', (m) => {
   const t = m.text();
   if (/MainMenuDialogClass: started/.test(t)) menuAt = Date.now();
   if (/\[debug\] star at/.test(t)) starSeen = true;
-  if (/\[debug\]|DirectInput|Input::|\[d3d9\] frame|abort|debug break|Assert|PAGEERROR|RuntimeError/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
+  if (/\[debug\]|DirectInput|Input::|\[d3d9\] frame|abort|debug break|damag|Assert|PAGEERROR|RuntimeError/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
   lines.push(`${stamp()} ${t}`);
 });
-page.on('pageerror', (e) => { lines.push(`PAGEERROR ${e.message}`); console.log(`PAGEERROR ${e.message}`); });
+// Hang watchdog: a CPU profile runs from the campaign start; if the page logs
+// nothing for 25 s, the profile is stopped and the hottest stacks of the last
+// 10 s are printed (the debugger cannot attach to a busy page in time).
+let lastLine = Date.now(), hangReported = false, profCdp = null;
+page.on('console', () => { lastLine = Date.now(); });
+async function startProfiler() {
+  profCdp = await ctx.newCDPSession(page);
+  await profCdp.send('Profiler.enable');
+  await profCdp.send('Profiler.setSamplingInterval', { interval: 2000 });
+  await profCdp.send('Profiler.start');
+}
+const watchdog = setInterval(async () => {
+  if (hangReported || !profCdp || Date.now() - lastLine < 25000) return;
+  hangReported = true;
+  console.log(`${stamp()} HANG: no output for 25 s, stopping profiler`);
+  const res = await Promise.race([profCdp.send('Profiler.stop'), new Promise((r) => setTimeout(() => r(null), 120000))]);
+  if (!res) { console.log('HANG: profiler did not answer'); process.exit(3); }
+  const { profile } = res;
+  writeFileSync(`${outDir}/hang.cpuprofile`, JSON.stringify(profile));
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const parent = new Map();
+  for (const n of profile.nodes) for (const c of n.children || []) parent.set(c, n.id);
+  let t = profile.endTime; const cutoff = profile.endTime - 10e6;
+  const stacks = new Map();
+  for (let k = profile.samples.length - 1; k >= 0 && t > cutoff; k--) {
+    t -= profile.timeDeltas[k];
+    const names = [];
+    for (let cur = profile.samples[k]; cur !== undefined; cur = parent.get(cur)) names.push(byId.get(cur).callFrame.functionName || '(anon)');
+    const key = names.slice(0, 40).join('\n    <- ');
+    stacks.set(key, (stacks.get(key) || 0) + 1);
+  }
+  for (const [k, c] of [...stacks.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4)) console.log(`HANG stack x${c}:\n    ${k}\n`);
+  process.exit(3);
+}, 2000);
+page.on("pageerror", (e) => { const l = `PAGEERROR ${e.message}\n${e.stack}`; lines.push(l); console.log(l); });
 await page.goto('http://127.0.0.1:8461/?nolock');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
@@ -28,6 +62,7 @@ const skipper = setInterval(() => page.evaluate(() => { if (document.getElementB
 while (!menuAt) await new Promise((r) => setTimeout(r, 500));
 await page.waitForTimeout(5000);
 await page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Start_Campaign(0), 0));
+await startProfiler();
 const dump = () => page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Input(), 0));
 for (let i = 0; i < 60 && !starSeen; i++) { await page.waitForTimeout(5000); await dump(); }
 let cinematic = true;
@@ -51,6 +86,8 @@ for (let round = 0; round < 3; round++) {
   await page.mouse.down();
   for (let i = 0; i < 6; i++) { await page.waitForTimeout(500); await dump(); }
   await page.mouse.up();
+  const amount = [30, 500, 500][round];
+  await page.evaluate((a) => setTimeout(() => Module._Rebel_Debug_Damage_Target(a), 0), amount);
   await page.waitForTimeout(3000);
   await page.screenshot({ path: `${outDir}/input-shoot-${round}.png`, timeout: 60000 }).catch(() => console.log('screenshot timed out'));
 }
