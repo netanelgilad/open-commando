@@ -11,9 +11,10 @@ mkdirSync(outDir, { recursive: true });
 const userData = new URL('./profile/', import.meta.url).pathname; // keeps OPFS between runs
 
 const ctx = await chromium.launchPersistentContext(userData, {
+  channel: 'chromium', // new headless mode: real GPU (ANGLE Metal) instead of SwiftShader
   headless: true,
   viewport: { width: 1280, height: 800 },
-  args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = ctx.pages()[0] || (await ctx.newPage());
 const lines = [];

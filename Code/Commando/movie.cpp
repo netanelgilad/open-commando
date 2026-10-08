@@ -141,6 +141,14 @@ void MovieGameModeClass::Start_Movie(const char *filename) {
   force_cd = false;
 #endif
 
+#ifdef REBEL_PORTABLE
+  // The web player streams transcoded cutscenes (and finishes at once when a
+  // movie isn't available), so there is no local file or CD to look for.
+  (void)force_cd;
+  Play_Movie(filename);
+  return;
+#endif
+
   //
   //	Play the movie (if it exists locally)
   //

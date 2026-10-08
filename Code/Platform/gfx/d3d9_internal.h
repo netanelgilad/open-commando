@@ -106,6 +106,7 @@ public:
   std::vector<uint8_t> Data; // CPU pixels when not a texture level
   GLuint Renderbuffer = 0;   // depth-stencil, or color for standalone RTs
   GLuint Fbo = 0;
+  GLuint AttachedDepth = 0; // depth renderbuffer currently attached to Fbo
   bool Locked = false;
 };
 
@@ -387,6 +388,10 @@ private:
   DWORD Fvf = 0;
   WORD Gamma[3][256];
   bool GammaIdentity = true;
+
+  // Diagnostics: logged periodically from Present.
+  unsigned FrameCount = 0, DrawCalls = 0, Clears = 0, Primitives = 0, FailedPrograms = 0;
+  double LastReport = 0;
 
   GLuint Vao = 0;
   GLuint ScratchVbo = 0, ScratchIbo = 0;

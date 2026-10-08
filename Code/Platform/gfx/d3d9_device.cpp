@@ -404,6 +404,16 @@ HRESULT Device::Present(const RECT *, const RECT *, HWND, const void *) {
   glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   // Re-bound before the next draw/clear.
+  FrameCount++;
+#ifdef __EMSCRIPTEN__
+  double now = emscripten_get_now();
+  if (now - LastReport > 5000.0) {
+    fprintf(stderr, "[d3d9] frame %u: %u draws, %u prims, %u clears, %u failed programs since last report\n", FrameCount,
+            DrawCalls, Primitives, Clears, FailedPrograms);
+    DrawCalls = Primitives = Clears = FailedPrograms = 0;
+    LastReport = now;
+  }
+#endif
   return D3D_OK;
 }
 
@@ -558,15 +568,12 @@ HRESULT Device::GetDepthStencilSurface(IDirect3DSurface9 **surface) {
 void Device::Bind_Framebuffer_For(Surface *color) {
   GLuint fbo = color->Framebuffer();
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-  GLint attached = 0, type = 0;
-  glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
-                                        &type);
-  if (type == GL_RENDERBUFFER)
-    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                                          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached);
+  // Track the attachment ourselves: querying GL here stalls the pipeline.
   GLuint want = CurrentDepth ? CurrentDepth->Renderbuffer : 0;
-  if ((GLuint)attached != want)
+  if (color->AttachedDepth != want) {
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, want);
+    color->AttachedDepth = want;
+  }
   if (color->Owner)
     color->Owner->GpuNewer = true;
 }
@@ -593,6 +600,7 @@ HRESULT Device::Clear(DWORD count, const D3DRECT *rects, DWORD flags, D3DCOLOR c
   }
   if (!mask)
     return D3D_OK;
+  Clears++;
   glEnable(GL_SCISSOR_TEST);
   if (count && rects) {
     for (DWORD i = 0; i < count; i++) {
@@ -1049,8 +1057,11 @@ bool Device::Prepare_Draw(UINT base_bytes, GLuint vbo, UINT stride, DWORD fvf) {
     stride = l.stride;
   FfpKey key = Build_Key(l);
   FfpProgram *p = Ffp_Program_For(key);
-  if (!p)
+  if (!p) {
+    FailedPrograms++;
     return false;
+  }
+  DrawCalls++;
   glUseProgram(p->program);
   Apply_Pipeline_State();
   Apply_Samplers(p);
@@ -1087,6 +1098,7 @@ HRESULT Device::DrawPrimitive(D3DPRIMITIVETYPE type, UINT start, UINT count) {
     return D3D_OK;
   GLsizei n;
   GLenum mode = Prim_Mode(type, count, n);
+  Primitives += (unsigned)n;
   glDrawArrays(mode, (GLint)start, n);
   return D3D_OK;
 }
@@ -1107,6 +1119,7 @@ HRESULT Device::DrawIndexedPrimitive(D3DPRIMITIVETYPE type, INT base_vertex, UIN
   GLsizei n;
   GLenum mode = Prim_Mode(type, prim_count, n);
   bool i32 = Indices->Format == D3DFMT_INDEX32;
+  Primitives += (unsigned)n;
   glDrawElements(mode, n, i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
                  (const void *)(uintptr_t)(start_index * (i32 ? 4u : 2u)));
   return D3D_OK;
@@ -1119,6 +1132,7 @@ HRESULT Device::DrawPrimitiveUP(D3DPRIMITIVETYPE type, UINT prim_count, const vo
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * stride), data, GL_STREAM_DRAW);
   if (!Prepare_Draw(0, ScratchVbo, stride, Fvf))
     return D3D_OK;
+  Primitives += (unsigned)n;
   glDrawArrays(mode, 0, n);
   // D3D9 resets stream 0 after a UP draw
   if (Stream) {
