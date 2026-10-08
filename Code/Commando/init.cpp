@@ -290,6 +290,7 @@ void Commando_Assert_Handler(const char *message) {
 
   if (cDevOptions::BreakToDebuggerOnAssert.Is_True()) {
 
+#ifndef REBEL_PORTABLE // the browser has no debugger to hand input to; keep playing
     if (cDevOptions::ShutdownInputOnAssert.Is_True()) {
       //
       // This input shutdown is to help those of us who still have the
@@ -298,6 +299,7 @@ void Commando_Assert_Handler(const char *message) {
       //
       Input::Shutdown();
     }
+#endif
 /*
                                           m
                 $m                mm            m
@@ -318,9 +320,11 @@ void Commando_Assert_Handler(const char *message) {
     __debugbreak();
   }
 
+#ifndef REBEL_PORTABLE // asserts are logged and the game continues
   if (cDevOptions::ExitThreadOnAssert.Is_True()) {
     ExitThread(1);
   }
+#endif
 
 #endif // WWDEBUG
 }

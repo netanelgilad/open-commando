@@ -111,7 +111,9 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD, LPSECURITY_ATTRI
     return INVALID_HANDLE_VALUE;
   }
   struct stat st;
-  if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode) && (access & GENERIC_WRITE)) {
+  // Windows only opens directories as files with FILE_FLAG_BACKUP_SEMANTICS,
+  // which the engine never uses ("Data\\" + empty name must fail).
+  if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
     ::close(fd);
     SetLastError(ERROR_ACCESS_DENIED);
     return INVALID_HANDLE_VALUE;

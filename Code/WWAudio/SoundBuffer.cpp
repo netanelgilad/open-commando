@@ -175,7 +175,11 @@ bool SoundBufferClass::Load_From_File(FileClass &file) {
     // Allocate a new buffer of the correct length and read the contents
     // of the file into the buffer
     m_Buffer = new unsigned char[m_Length];
-    retval = bool(file.Read(m_Buffer, m_Length) == (int)m_Length);
+    int got = file.Read(m_Buffer, m_Length);
+    retval = bool(got == (int)m_Length);
+    if (!retval) {
+      WWDEBUG_SAY(("SoundBufferClass: short read of %s: %d of %lu bytes\n", file.File_Name(), got, (unsigned long)m_Length));
+    }
 
     // If we failed, free the buffer
     if (retval == false) {

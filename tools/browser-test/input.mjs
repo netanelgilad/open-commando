@@ -1,0 +1,47 @@
+// Starts the campaign, waits for the player, then holds W / moves the mouse
+// and dumps the input pipeline state (Rebel_Debug_Input) along the way.
+import { chromium } from 'playwright';
+import { mkdirSync, writeFileSync } from 'node:fs';
+const outDir = new URL('./out/', import.meta.url).pathname;
+mkdirSync(outDir, { recursive: true });
+const ctx = await chromium.launchPersistentContext(new URL('./profile/', import.meta.url).pathname, {
+  channel: 'chromium', headless: true, viewport: { width: 1280, height: 800 },
+  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+});
+const page = ctx.pages()[0] || (await ctx.newPage());
+const lines = [];
+let menuAt = 0, starSeen = false;
+const t0 = Date.now();
+const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
+page.on('console', (m) => {
+  const t = m.text();
+  if (/MainMenuDialogClass: started/.test(t)) menuAt = Date.now();
+  if (/\[debug\] star at/.test(t)) starSeen = true;
+  if (/\[debug\]|DirectInput|Input::/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
+  lines.push(`${stamp()} ${t}`);
+});
+page.on('pageerror', (e) => { lines.push(`PAGEERROR ${e.message}`); console.log(`PAGEERROR ${e.message}`); });
+await page.goto('http://127.0.0.1:8461/?log&nolock');
+await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
+await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
+const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
+while (!menuAt) await new Promise((r) => setTimeout(r, 500));
+await page.waitForTimeout(5000);
+await page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Start_Campaign(0), 0));
+const dump = () => page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Input(), 0));
+for (let i = 0; i < 60 && !starSeen; i++) { await page.waitForTimeout(5000); await dump(); }
+let cinematic = true;
+page.on('console', (m) => { const r = /cinematic=(\d)/.exec(m.text()); if (r) cinematic = r[1] === '1'; });
+for (let i = 0; i < 40 && cinematic; i++) { await page.waitForTimeout(10000); await dump(); if (i % 3 == 0) await page.screenshot({ path: `${outDir}/input-wait-${i}.png` }); }
+await page.screenshot({ path: `${outDir}/input-before.png` });
+await page.mouse.click(640, 400);
+await page.keyboard.down('KeyW');
+for (let i = 0; i < 6; i++) { await page.waitForTimeout(500); await dump(); }
+await page.keyboard.up('KeyW');
+await page.screenshot({ path: `${outDir}/input-after-w.png` });
+for (let i = 0; i < 10; i++) { await page.mouse.move(640 + i * 30, 400); await page.waitForTimeout(100); }
+await dump();
+await page.screenshot({ path: `${outDir}/input-after-mouse.png` });
+clearInterval(skipper);
+writeFileSync(`${outDir}/input-console.log`, lines.join('\n'));
+await ctx.close();
