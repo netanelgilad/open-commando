@@ -49,3 +49,16 @@ where the shortcut lives and what "done" looks like.
   (`Sleep`, `WaitForSingleObject`); revisit once the main-loop model
   (ASYNCIFY/JSPI vs. worker) is settled.
 - **Cutscenes (Bink)**: not yet handled; plan is offline transcode to WebM.
+
+## Performance / build
+
+- **Gameplay frame rate**: about 6-7 fps in M13 at roughly 340 draws per frame
+  (menus run at about 34 fps). Profile the D3D9-on-WebGL2 layer's per-draw cost
+  first (state diffing, uniform uploads, buffer re-uploads).
+- **Level load** takes about 90 s (I/O through the OPFS proxy, plus asset parsing).
+- **Debug build**: shipped with `-sASSERTIONS=1 -sSTACK_OVERFLOW_CHECK=2` and
+  WWDEBUG. Asserts are logged and play continues; `Commando_Assert_Handler` no
+  longer shuts down input or calls ExitThread under REBEL_PORTABLE. A release
+  build (and possibly JSPI instead of ASYNCIFY) is still to do.
+- **Pointer lock only**: mouse-look needs pointer lock (click the canvas).
+  Without it, for example with `?nolock`, the mouse only drives the menu cursor.

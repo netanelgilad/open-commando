@@ -39,7 +39,7 @@ await page.keyboard.down('KeyW');
 for (let i = 0; i < 6; i++) { await page.waitForTimeout(500); await dump(); }
 await page.keyboard.up('KeyW');
 await page.screenshot({ path: `${outDir}/input-after-w.png` });
-for (let i = 0; i < 10; i++) { await page.mouse.move(640 + i * 30, 400); await page.waitForTimeout(100); }
+for (let i = 0; i < 20; i++) { await page.evaluate(() => Module._Rebel_Input_Mouse_Move(20, 0)); await page.waitForTimeout(100); }
 await dump();
 await page.screenshot({ path: `${outDir}/input-after-mouse.png` });
 clearInterval(skipper);
