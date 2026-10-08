@@ -20,9 +20,14 @@
 #endif
 
 extern "C" void Rebel_Frame_Yield(void);
+extern "C" unsigned Rebel_Stat_Sleep_Count; // win32_core.cpp
+extern "C" double Rebel_Stat_Sleep_Ms;
 DWORD Rebel_Last_Frame_Yield = 0;
 
 namespace rebel_d3d {
+
+unsigned long long Stat_Buffer_Bytes = 0, Stat_Texture_Bytes = 0;
+unsigned Stat_Buffer_Uploads = 0, Stat_Texture_Uploads = 0;
 
 HRESULT Copy_Surface(Surface *dst, const RECT *dst_rect, Surface *src, const RECT *src_rect, bool linear);
 
@@ -408,15 +413,42 @@ HRESULT Device::Present(const RECT *, const RECT *, HWND, const void *) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   // Re-bound before the next draw/clear.
   FrameCount++;
+#ifdef __EMSCRIPTEN__
+  // Frame timing: "work" is game time between frame yields, "wait" the time
+  // the browser took to hand the frame back (vsync, GPU, other tasks).
+  static double work_sum = 0, work_max = 0, wait_sum = 0, wait_max = 0, yield_end = 0;
+  static unsigned frames = 0;
+  double before = emscripten_get_now();
+  if (yield_end > 0) {
+    double work = before - yield_end;
+    work_sum += work;
+    work_max = work > work_max ? work : work_max;
+  }
+#endif
   Rebel_Last_Frame_Yield = GetTickCount();
   Rebel_Frame_Yield();
   Rebel_Last_Frame_Yield = GetTickCount();
 #ifdef __EMSCRIPTEN__
   double now = emscripten_get_now();
+  double wait = now - before;
+  wait_sum += wait;
+  wait_max = wait > wait_max ? wait : wait_max;
+  yield_end = now;
+  frames++;
   if (now - LastReport > 5000.0) {
-    fprintf(stderr, "[d3d9] frame %u: %u draws, %u prims, %u clears, %u failed programs since last report\n", FrameCount,
-            DrawCalls, Primitives, Clears, FailedPrograms);
+    fprintf(stderr,
+            "[d3d9] frame %u: %.1f fps, %u draws, %u prims, %u clears, %u failed programs; work %.1f ms avg (max %.0f), "
+            "wait %.1f ms avg (max %.0f), %u sleeps %.0f ms; uploads: %u buffers %.1f MB, %u textures %.1f MB\n",
+            FrameCount, frames * 1000.0 / (now - LastReport), DrawCalls, Primitives, Clears, FailedPrograms,
+            work_sum / frames, work_max, wait_sum / frames, wait_max, Rebel_Stat_Sleep_Count, Rebel_Stat_Sleep_Ms,
+            Stat_Buffer_Uploads, Stat_Buffer_Bytes / 1048576.0, Stat_Texture_Uploads, Stat_Texture_Bytes / 1048576.0);
+    Stat_Buffer_Bytes = Stat_Texture_Bytes = 0;
+    Stat_Buffer_Uploads = Stat_Texture_Uploads = 0;
     DrawCalls = Primitives = Clears = FailedPrograms = 0;
+    work_sum = work_max = wait_sum = wait_max = 0;
+    frames = 0;
+    Rebel_Stat_Sleep_Count = 0;
+    Rebel_Stat_Sleep_Ms = 0;
     LastReport = now;
   }
 #endif
@@ -1136,6 +1168,8 @@ HRESULT Device::DrawPrimitiveUP(D3DPRIMITIVETYPE type, UINT prim_count, const vo
   GLenum mode = Prim_Mode(type, prim_count, n);
   glBindBuffer(GL_ARRAY_BUFFER, ScratchVbo);
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * stride), data, GL_STREAM_DRAW);
+  Stat_Buffer_Bytes += (size_t)n * stride;
+  Stat_Buffer_Uploads++;
   if (!Prepare_Draw(0, ScratchVbo, stride, Fvf))
     return D3D_OK;
   Primitives += (unsigned)n;

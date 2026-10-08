@@ -26,6 +26,11 @@
 
 namespace rebel_d3d {
 
+// Upload counters for the frame stats report (bytes / calls since last report).
+extern unsigned long long Stat_Buffer_Bytes, Stat_Texture_Bytes;
+extern unsigned Stat_Buffer_Uploads, Stat_Texture_Uploads;
+
+
 class Device;
 
 /* -------------------------------------------------------------- formats */

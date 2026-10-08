@@ -17,11 +17,11 @@ page.on('console', (m) => {
   const t = m.text();
   if (/MainMenuDialogClass: started/.test(t)) menuAt = Date.now();
   if (/\[debug\] star at/.test(t)) starSeen = true;
-  if (/\[debug\]|DirectInput|Input::/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
+  if (/\[debug\]|DirectInput|Input::|\[d3d9\] frame|abort|debug break|Assert|PAGEERROR|RuntimeError/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
   lines.push(`${stamp()} ${t}`);
 });
 page.on('pageerror', (e) => { lines.push(`PAGEERROR ${e.message}`); console.log(`PAGEERROR ${e.message}`); });
-await page.goto('http://127.0.0.1:8461/?log&nolock');
+await page.goto('http://127.0.0.1:8461/?nolock');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
 const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
@@ -42,6 +42,20 @@ await page.screenshot({ path: `${outDir}/input-after-w.png` });
 for (let i = 0; i < 20; i++) { await page.evaluate(() => Module._Rebel_Input_Mouse_Move(20, 0)); await page.waitForTimeout(100); }
 await dump();
 await page.screenshot({ path: `${outDir}/input-after-mouse.png` });
+// Fire: hold the left button (aimed at whatever is in front), then check
+// the game keeps presenting frames.
+for (let round = 0; round < 3; round++) {
+  await page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Bring_Target(), 0));
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${outDir}/input-target-${round}.png`, timeout: 60000 }).catch(() => {});
+  await page.mouse.down();
+  for (let i = 0; i < 6; i++) { await page.waitForTimeout(500); await dump(); }
+  await page.mouse.up();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: `${outDir}/input-shoot-${round}.png`, timeout: 60000 }).catch(() => console.log('screenshot timed out'));
+}
+await page.waitForTimeout(15000);
+await dump();
 clearInterval(skipper);
 writeFileSync(`${outDir}/input-console.log`, lines.join('\n'));
 await ctx.close();

@@ -138,10 +138,17 @@ extern "C" BOOL QueryPerformanceFrequency(LARGE_INTEGER *freq) {
 
 // The game build links with ASYNCIFY: sleeping on the browser main thread
 // unwinds to the event loop and resumes later instead of blocking.
+extern "C" unsigned Rebel_Stat_Sleep_Count = 0; // reported with the frame stats (d3d9_device.cpp)
+extern "C" double Rebel_Stat_Sleep_Ms = 0;
+
 extern "C" void Rebel_Yield(DWORD ms) {
 #ifdef __EMSCRIPTEN__
-  if (emscripten_has_asyncify())
+  if (emscripten_has_asyncify()) {
+    double t = emscripten_get_now();
     emscripten_sleep(ms);
+    Rebel_Stat_Sleep_Count++;
+    Rebel_Stat_Sleep_Ms += emscripten_get_now() - t;
+  }
 #else
   (void)ms;
 #endif
@@ -151,6 +158,7 @@ extern "C" void Rebel_Yield(DWORD ms) {
 // Wait for the next display frame (vsync). Falls back to a short timer when
 // the tab is hidden, where requestAnimationFrame does not fire.
 EM_ASYNC_JS(void, Rebel_JS_Wait_Frame, (void), {
+  if (Module.rebelFrame) Module.rebelFrame(); // page frame counter
   await new Promise(function(resolve) {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible' && typeof requestAnimationFrame === 'function')
       requestAnimationFrame(function() { resolve(); });

@@ -261,6 +261,10 @@ void Texture::Upload() {
   if (!AnyDirty)
     return;
   AnyDirty = false;
+  Stat_Texture_Uploads++;
+  for (const LevelData &l : Levels)
+    if (l.dirty)
+      Stat_Texture_Bytes += l.bits.size();
   GLint prev_unit = 0, prev_tex = 0;
   glGetIntegerv(GL_ACTIVE_TEXTURE, &prev_unit);
   glActiveTexture(UploadUnit);
@@ -382,6 +386,8 @@ void VertexBuffer::Upload() {
     return;
   glBindBuffer(GL_ARRAY_BUFFER, Gl);
   glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)DirtyBegin, (GLsizeiptr)(DirtyEnd - DirtyBegin), Data.data() + DirtyBegin);
+  Stat_Buffer_Bytes += DirtyEnd - DirtyBegin;
+  Stat_Buffer_Uploads++;
   DirtyBegin = DirtyEnd = 0;
 }
 
@@ -459,6 +465,8 @@ void IndexBuffer::Upload() {
     return;
   glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, (GLintptr)DirtyBegin, (GLsizeiptr)(DirtyEnd - DirtyBegin),
                   Data.data() + DirtyBegin);
+  Stat_Buffer_Bytes += DirtyEnd - DirtyBegin;
+  Stat_Buffer_Uploads++;
   DirtyBegin = DirtyEnd = 0;
 }
 

@@ -9,12 +9,41 @@ const canvas = $('canvas'), movie = $('movie'), logEl = $('log');
 const params = new URLSearchParams(location.search);
 if (params.has('log')) document.body.classList.add('show-log');
 
-function log(line) {
-  console.log(line);
-  logEl.textContent += line + '\n';
-  if (logEl.textContent.length > 200000) logEl.textContent = logEl.textContent.slice(-150000);
+// The on-page log (?log) is updated at most once per frame: touching the DOM
+// per line (the engine logs a lot) costs whole frames.
+const showLog = params.has('log');
+let pendingLog = [];
+function flushLog() {
+  if (!pendingLog.length) return;
+  let text = logEl.textContent + pendingLog.join('\n') + '\n';
+  pendingLog = [];
+  if (text.length > 200000) text = text.slice(-150000);
+  logEl.textContent = text;
   logEl.scrollTop = logEl.scrollHeight;
 }
+function log(line) {
+  console.log(line);
+  if (!showLog) return;
+  if (!pendingLog.length) requestAnimationFrame(flushLog);
+  pendingLog.push(line);
+}
+// Frame counter (top right): on by default, ?nofps hides it, F8 toggles.
+// The engine calls Module.rebelFrame() once per presented frame.
+const fpsEl = $('fps');
+if (!params.has('nofps')) document.body.classList.add('show-fps');
+let fpsFrames = 0, fpsSince = performance.now(), fpsWorst = 0, fpsLast = performance.now();
+function rebelFrameTick() {
+  const now = performance.now();
+  fpsWorst = Math.max(fpsWorst, now - fpsLast);
+  fpsLast = now;
+  fpsFrames++;
+  if (now - fpsSince >= 500) {
+    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms`;
+    fpsFrames = 0; fpsSince = now; fpsWorst = 0;
+  }
+}
+window.addEventListener('keydown', (e) => { if (e.code === 'F8') document.body.classList.toggle('show-fps'); }, true);
+
 function setStatus(text) { statusEl.textContent = text; }
 function fmtBytes(n) { return n > 1 << 30 ? (n / (1 << 30)).toFixed(2) + ' GB' : (n / (1 << 20)).toFixed(0) + ' MB'; }
 
@@ -55,6 +84,7 @@ const WM = { KEYDOWN: 0x100, KEYUP: 0x101, CHAR: 0x102, SYSKEYDOWN: 0x104, SYSKE
 /* ----------------------------------------------------------------- module */
 
 var Module = {
+  rebelFrame: rebelFrameTick,
   canvas,
   arguments: (params.get('args') || '').split(' ').filter(Boolean),
   print: (t) => log(t),
