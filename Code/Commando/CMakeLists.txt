@@ -372,5 +372,5 @@ if(REBEL_PORTABLE)
         "SHELL:-sEXPORTED_FUNCTIONS=_main,_Rebel_Post_Message,_Rebel_Set_Screen_Size,_Rebel_Input_Key,_Rebel_Input_Mouse_Move,_Rebel_Input_Mouse_Wheel,_Rebel_Input_Mouse_Button,_Rebel_Input_Release_All,_Rebel_Audio_Update,_malloc,_free"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=callMain,ccall,cwrap,UTF8ToString,stringToUTF8,HEAPU16"
     )
-    set_target_properties(Renegade PROPERTIES SUFFIX ".js" OUTPUT_NAME "renegade")
+    set_target_properties(Renegade PROPERTIES SUFFIX ".js" OUTPUT_NAME "renegade" OUTPUT_NAME_DEBUG "renegade" OUTPUT_NAME_RELWITHDEBINFO "renegade")
 endif()

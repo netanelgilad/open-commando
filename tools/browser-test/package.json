@@ -1,0 +1,1 @@
+{ "name": "rebel-browser-test", "private": true, "type": "module", "dependencies": { "playwright": "^1" } }

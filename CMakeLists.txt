@@ -25,16 +25,18 @@ if(REBEL_PORTABLE)
     include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/Code/Platform/compat")
     # _WINDOWS: the compat layer provides Win32, so take the engine's Windows paths.
     add_compile_definitions(REBEL_PORTABLE _WINDOWS)
-    add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/rebel_portable.h" -fwasm-exceptions -pthread)
+    add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/rebel_portable.h" -pthread)
     # C++ TUs also get the Win32/COM declarations at global scope up front, as
     # the Windows SDK headers effectively were. WWOnline includes wolapi.h
     # inside "namespace WOL {}", which would otherwise capture first includes.
     add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/ole2.h>")
-    add_link_options(-fwasm-exceptions -pthread)
+    # No -fwasm-exceptions: the engine never catches (no try blocks), and the
+    # game links with ASYNCIFY, which does not support wasm exception handling.
+    add_link_options(-pthread)
     add_compile_options(-Wno-everything -fms-extensions -fno-delayed-template-parsing)
     # Windows system / proprietary SDK libraries become empty targets; the
     # replacements are compiled into RebelPlatform instead.
-    foreach(_lib dinput8 imagehlp odbc32 odbccp32 shlwapi version vfw32 winmm ws2_32)
+    foreach(_lib dinput8 imagehlp odbc32 odbccp32 shlwapi version vfw32 Vfw32 winmm ws2_32)
         add_library(${_lib} INTERFACE)
     endforeach()
     add_library(Microsoft::D3DX INTERFACE IMPORTED)

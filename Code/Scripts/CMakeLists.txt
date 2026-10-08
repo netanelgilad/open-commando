@@ -59,6 +59,9 @@ if(REBEL_PORTABLE)
     # No DLLs on the web: scripts link into the game; LoadLibrary("SCRIPTS.DLL")
     # resolves to them via the built-in module table (Platform/win32/win32_core.cpp).
     add_library(Scripts STATIC ${SOURCES})
+    # As a DLL the scripts kept private copies of a few helpers that the game
+    # also defines; rename the scripts' copies so both keep their behaviour.
+    target_compile_definitions(Scripts PRIVATE strtrim=Scripts_strtrim)
 else()
     add_library(Scripts SHARED ${SOURCES})
 endif()

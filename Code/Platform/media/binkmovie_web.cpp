@@ -17,7 +17,10 @@
 #include <emscripten.h>
 
 EM_JS(void, Rebel_JS_Movie_Play, (const char *path), {
-  var name = UTF8ToString(path).replace(/\\/g, '/').split('/').pop().replace(/\.bik$/i, '');
+  // no backslashes here: EM_JS bodies pass through a C string literal
+  var name = UTF8ToString(path).split(String.fromCharCode(92)).join('/').split('/').pop();
+  var dot = name.lastIndexOf('.');
+  if (dot > 0 && name.slice(dot).toLowerCase() === '.bik') name = name.slice(0, dot);
   Module.rebelMovieDone = false;
   if (typeof Module.rebelPlayMovie !== 'function') {
     Module.rebelMovieDone = true;

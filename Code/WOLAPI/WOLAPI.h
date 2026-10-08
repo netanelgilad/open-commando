@@ -338,7 +338,11 @@ void __RPC_STUB IRTPatcherEvent_OnTermination_Stub(IRpcStubBuffer *This, IRpcCha
 /* interface IChat */
 /* [object][unique][helpstring][uuid] */
 
-#ifndef REBEL_PORTABLE // 32-bit time_t in the WOL COM ABI; clashes with the 64-bit system type
+#ifdef REBEL_PORTABLE
+// WOL's COM ABI uses a 32-bit time_t; alias the system type instead (the service
+// is never reached on the web, and redeclaring ::time_t as itself is legal).
+typedef ::time_t time_t;
+#else
 typedef long time_t;
 #endif
 
