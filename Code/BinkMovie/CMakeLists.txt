@@ -1,5 +1,10 @@
+if(REBEL_PORTABLE)
+    set(BINK_PLAYER ${PROJECT_SOURCE_DIR}/Code/Platform/media/binkmovie_web.cpp)
+else()
+    set(BINK_PLAYER BINKMovie.cpp)
+endif()
 set(SOURCES
-    BINKMovie.cpp
+    ${BINK_PLAYER}
     subtitle.cpp
     subtitlemanager.cpp
     subtitleparser.cpp

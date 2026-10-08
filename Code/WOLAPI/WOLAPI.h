@@ -338,7 +338,9 @@ void __RPC_STUB IRTPatcherEvent_OnTermination_Stub(IRpcStubBuffer *This, IRpcCha
 /* interface IChat */
 /* [object][unique][helpstring][uuid] */
 
+#ifndef REBEL_PORTABLE // 32-bit time_t in the WOL COM ABI; clashes with the 64-bit system type
 typedef long time_t;
+#endif
 
 typedef enum Locale {
   LOC_UNKNOWN = 0,

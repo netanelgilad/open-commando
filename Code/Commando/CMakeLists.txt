@@ -117,6 +117,11 @@ set(GUI_SOURCES
     skinpackagemgr.cpp
     WebBrowser.cpp
 )
+if(REBEL_PORTABLE)
+    # IE embedding is Windows-only; the web build links a browser-less stand-in.
+    list(REMOVE_ITEM GUI_SOURCES WebBrowser.cpp)
+    list(APPEND GUI_SOURCES ${PROJECT_SOURCE_DIR}/Code/Platform/media/webbrowser_web.cpp)
+endif()
 set(LANWOL_SOURCES
     lanchat.cpp
     chatshre.cpp
@@ -323,3 +328,49 @@ set_target_properties(Renegade PROPERTIES
     OUTPUT_NAME_DEBUG "RenegadeD"
     OUTPUT_NAME_RELWITHDEBINFO "RenegadeP"
 )
+
+if(REBEL_PORTABLE)
+    # Dialog templates: compile chat.rc to a Win32 .res and embed it; the
+    # FindResource/LoadResource replacements read it at /rebel/chat.res.
+    find_program(REBEL_LLVM_RC llvm-rc HINTS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin REQUIRED)
+    set(REBEL_CHAT_RES ${CMAKE_CURRENT_BINARY_DIR}/chat.res)
+    add_custom_command(
+        OUTPUT ${REBEL_CHAT_RES}
+        COMMAND ${REBEL_LLVM_RC} /C 1252 /D _WIN32 /D NDEBUG
+                /I ${CMAKE_CURRENT_SOURCE_DIR} /I ${PROJECT_SOURCE_DIR}/Code/Platform/rc-include
+                /fo ${REBEL_CHAT_RES} chat.rc
+        # relative input: llvm-rc reads arguments starting with '/' as options
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        DEPENDS chat.rc resource.h dialogresource.h ${PROJECT_SOURCE_DIR}/Code/Platform/rc-include/afxres.h
+        COMMENT "Compiling dialog resources (chat.rc)"
+    )
+    add_custom_target(RenegadeResources DEPENDS ${REBEL_CHAT_RES})
+    add_dependencies(Renegade RenegadeResources)
+    target_link_options(Renegade PRIVATE "SHELL:--embed-file ${REBEL_CHAT_RES}@/rebel/chat.res")
+endif()
+
+if(REBEL_PORTABLE)
+    # Browser entry point and link setup for the game.
+    target_sources(Renegade PRIVATE ${PROJECT_SOURCE_DIR}/Code/Platform/web/main_web.cpp)
+    # Scripts register themselves with static constructors: keep every object.
+    target_link_options(Renegade PRIVATE "SHELL:-Wl,--whole-archive $<TARGET_FILE:Scripts> -Wl,--no-whole-archive")
+    target_link_options(Renegade PRIVATE
+        -sWASMFS
+        -sASYNCIFY
+        -sASYNCIFY_STACK_SIZE=262144
+        -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=268435456
+        -sMAXIMUM_MEMORY=4294967296
+        -sSTACK_SIZE=8388608
+        -sPTHREAD_POOL_SIZE=6
+        -sMIN_WEBGL_VERSION=2
+        -sMAX_WEBGL_VERSION=2
+        -sEXIT_RUNTIME=0
+        -sENVIRONMENT=web,worker
+        -sINVOKE_RUN=0
+        -sMODULARIZE=0
+        "SHELL:-sEXPORTED_FUNCTIONS=_main,_Rebel_Post_Message,_Rebel_Set_Screen_Size,_Rebel_Input_Key,_Rebel_Input_Mouse_Move,_Rebel_Input_Mouse_Wheel,_Rebel_Input_Mouse_Button,_Rebel_Input_Release_All,_Rebel_Audio_Update,_malloc,_free"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS=callMain,ccall,cwrap,UTF8ToString,stringToUTF8,HEAPU16"
+    )
+    set_target_properties(Renegade PROPERTIES SUFFIX ".js" OUTPUT_NAME "renegade")
+endif()

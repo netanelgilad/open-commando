@@ -813,7 +813,7 @@ STDMETHODIMP ChatObserver::OnChannelJoin(HRESULT result, WOL::Channel *inChannel
   WWASSERT(inUser != NULL && "OnChannelJoin parameter error");
 
   struct in_addr addr;
-  addr.S_un.S_addr = inUser->ipaddr;
+  addr.s_addr = inUser->ipaddr; // s_addr maps to S_un.S_addr on Windows
 
   WWDEBUG_SAY(
       ("WOL: User '%s' @ %s joining channel '%s'\n", (char *)inUser->name, inet_ntoa(addr), (char *)inChannel->name));

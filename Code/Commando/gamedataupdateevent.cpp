@@ -54,7 +54,12 @@ void cGameDataUpdateEvent::Init(int client_id) {
   WWASSERT(cNetwork::I_Am_Server());
   // WWASSERT(client_id >= 0);
 
+#ifdef REBEL_PORTABLE
+  // MSVC compiled this as "construct and discard a temporary"; keep that.
+  { cGameDataUpdateEvent discarded_temporary; }
+#else
   cGameDataUpdateEvent::cGameDataUpdateEvent();
+#endif
 
   WWASSERT(The_Game() != NULL);
   TimeRemainingSeconds = (int)The_Game()->Get_Time_Remaining_Seconds();

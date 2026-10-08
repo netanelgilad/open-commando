@@ -59,7 +59,13 @@ enum PlayerlistFormatEnum {
 };
 
 //-----------------------------------------------------------------------------
+#ifdef REBEL_PORTABLE
+// All-static helper; MSVC let its statics shadow GameModeClass's pure virtuals.
+// Nothing uses it as a GameModeClass, so drop the base where that's an error.
+class MultiHUDClass {
+#else
 class MultiHUDClass : public GameModeClass {
+#endif
 public:
   static void Init(void);
   static void Shutdown(void);

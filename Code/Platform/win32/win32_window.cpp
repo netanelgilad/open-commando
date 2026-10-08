@@ -301,7 +301,29 @@ extern "C" LRESULT CallWindowProcA(WNDPROC proc, HWND w, UINT msg, WPARAM wp, LP
   return proc ? proc(w, msg, wp, lp) : 0;
 }
 
-extern "C" BOOL PeekMessageA(LPMSG msg, HWND, UINT min, UINT max, UINT remove) {
+extern "C" void Rebel_Yield(DWORD ms);
+extern "C" void Rebel_Audio_Update(void);
+
+// The game pumps messages once per frame; when the queue is empty, hand the
+// browser a turn (present the frame, deliver input) at most every ~4 ms.
+static void Maybe_Yield_To_Browser() {
+  static DWORD last = 0;
+  DWORD now = GetTickCount();
+  if (now - last >= 4) {
+    Rebel_Audio_Update(); // refill streamed music before yielding
+    Rebel_Yield(0);
+    last = GetTickCount();
+  }
+}
+
+extern "C" BOOL PeekMessageA(LPMSG msg, HWND w, UINT min, UINT max, UINT remove) {
+  bool empty;
+  {
+    std::lock_guard<std::recursive_mutex> g(Lock);
+    empty = Queue.empty() && !QuitPosted;
+  }
+  if (empty)
+    Maybe_Yield_To_Browser(); // events arriving during the yield land in Queue
   std::lock_guard<std::recursive_mutex> g(Lock);
   if (QuitPosted && Queue.empty()) {
     memset(msg, 0, sizeof(*msg));
@@ -324,6 +346,7 @@ extern "C" BOOL PeekMessageA(LPMSG msg, HWND, UINT min, UINT max, UINT remove) {
 }
 
 extern "C" BOOL GetMessageA(LPMSG msg, HWND w, UINT min, UINT max) {
+  (void)w;
   // Non-blocking on the web: the caller's loop runs once per frame.
   if (!PeekMessageA(msg, w, min, max, PM_REMOVE)) {
     memset(msg, 0, sizeof(*msg));

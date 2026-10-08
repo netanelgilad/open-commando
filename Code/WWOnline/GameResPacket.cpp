@@ -32,6 +32,7 @@
  *
  ******************************************************************************/
 
+#include <algorithm>
 #include "GameResPacket.h"
 #include <assert.h>
 #include <string.h>
@@ -430,7 +431,7 @@ bool GameResPacket::Get_Field(char *id, void *data, int &length) {
   GameResField *field = Find_Field(id);
 
   if (field) {
-    memcpy(data, field->mData, min((int)field->mSize, length));
+    memcpy(data, field->mData, std::min<int>((int)field->mSize, length));
     length = (int)field->mSize;
   }
 

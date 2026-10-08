@@ -55,7 +55,13 @@ set(SOURCES
     #unitcombat.cpp
 )
 
-add_library(Scripts SHARED ${SOURCES})
+if(REBEL_PORTABLE)
+    # No DLLs on the web: scripts link into the game; LoadLibrary("SCRIPTS.DLL")
+    # resolves to them via the built-in module table (Platform/win32/win32_core.cpp).
+    add_library(Scripts STATIC ${SOURCES})
+else()
+    add_library(Scripts SHARED ${SOURCES})
+endif()
 target_include_directories(Scripts PUBLIC
     $<BUILD_INTERFACE:
         ${PROJECT_SOURCE_DIR}/Code/Scripts

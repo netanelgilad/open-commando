@@ -131,12 +131,23 @@ extern "C" BOOL QueryPerformanceFrequency(LARGE_INTEGER *freq) {
   return TRUE;
 }
 
-extern "C" void Sleep(DWORD ms) {
-  // On the browser main thread this must not block; the frame pump
-  // (web/main_loop) yields between frames instead.
+// The game build links with ASYNCIFY: sleeping on the browser main thread
+// unwinds to the event loop and resumes later instead of blocking.
+extern "C" void Rebel_Yield(DWORD ms) {
 #ifdef __EMSCRIPTEN__
-  if (emscripten_is_main_browser_thread())
+  if (emscripten_has_asyncify())
+    emscripten_sleep(ms);
+#else
+  (void)ms;
+#endif
+}
+
+extern "C" void Sleep(DWORD ms) {
+#ifdef __EMSCRIPTEN__
+  if (emscripten_is_main_browser_thread()) {
+    Rebel_Yield(ms);
     return;
+  }
 #endif
   usleep((useconds_t)ms * 1000);
 }
@@ -339,10 +350,10 @@ static HANDLE const PseudoThread = (HANDLE)(LONG_PTR)-2;
 extern "C" DWORD GetModuleFileNameA(HMODULE, LPSTR buf, DWORD size) {
   // The game derives its install directory from this; the web runtime
   // mounts the game data at /game.
-  const char *exe = "/game/Game.exe";
+  const char *dir = getenv("REBEL_GAME_DIR");
   if (!buf || !size)
     return 0;
-  snprintf(buf, size, "%s", exe);
+  snprintf(buf, size, "%s/Game.exe", dir ? dir : "/game");
   return (DWORD)strlen(buf);
 }
 extern "C" HMODULE GetModuleHandleA(LPCSTR) { return (HMODULE)0x400000; }
@@ -352,6 +363,14 @@ extern "C" HMODULE GetModuleHandleA(LPCSTR) { return (HMODULE)0x400000; }
 struct IDirect3D9;
 extern "C" IDirect3D9 *Direct3DCreate9(UINT sdk_version);
 extern "C" HRESULT DirectInput8Create(HINSTANCE, DWORD, const GUID &, LPVOID *, void *);
+// Scripts library entry points (Scripts/DLLmain.cpp). Weak: tools and tests
+// that don't link the scripts still build; the game links them in full.
+class ScriptClass;
+class ScriptCommandsClass;
+__attribute__((weak)) ScriptClass *Create_Script(const char *name);
+__attribute__((weak)) void Destroy_Script(ScriptClass *script);
+__attribute__((weak)) bool Set_Script_Commands(ScriptCommandsClass *commands);
+__attribute__((weak)) void Set_Request_Destroy_Func(void (*function)(ScriptClass *));
 namespace {
 struct BuiltinExport {
   const char *module;
@@ -361,6 +380,14 @@ struct BuiltinExport {
 const BuiltinExport BuiltinExports[] = {
     {"d3d9.dll", "Direct3DCreate9", (FARPROC)&Direct3DCreate9},
     {"dinput8.dll", "DirectInput8Create", (FARPROC)&DirectInput8Create},
+#define REBEL_SCRIPTS_MODULE(dll)                                                                                      \
+  {dll, "Create_Script", (FARPROC)&Create_Script}, {dll, "Destroy_Script", (FARPROC)&Destroy_Script},                  \
+      {dll, "Set_Script_Commands", (FARPROC)&Set_Script_Commands},                                                     \
+      {dll, "Set_Request_Destroy_Func", (FARPROC)&Set_Request_Destroy_Func}
+    REBEL_SCRIPTS_MODULE("scripts.dll"),
+    REBEL_SCRIPTS_MODULE("scriptsd.dll"),
+    REBEL_SCRIPTS_MODULE("scriptsp.dll"),
+#undef REBEL_SCRIPTS_MODULE
 };
 const char *Module_Base_Name(const char *name) {
   const char *base = name;
@@ -375,7 +402,7 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name) {
   if (name) {
     const char *base = Module_Base_Name(name);
     for (const BuiltinExport &e : BuiltinExports)
-      if (strcasecmp(e.module, base) == 0)
+      if (strcasecmp(e.module, base) == 0 && e.fn)
         return (HMODULE)(const void *)e.module;
   }
   fprintf(stderr, "[win32] LoadLibrary(%s) -> not available\n", name ? name : "");
@@ -385,7 +412,7 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name) {
 extern "C" BOOL FreeLibrary(HMODULE) { return TRUE; }
 extern "C" FARPROC GetProcAddress(HMODULE mod, LPCSTR name) {
   for (const BuiltinExport &e : BuiltinExports)
-    if ((const void *)e.module == (const void *)mod && name && strcmp(e.name, name) == 0)
+    if (mod && strcasecmp(e.module, (const char *)mod) == 0 && name && strcmp(e.name, name) == 0)
       return e.fn;
   return nullptr;
 }
@@ -466,10 +493,109 @@ extern "C" int LoadStringW(HINSTANCE, UINT id, LPWSTR buf, int max) {
   return 0;
 }
 
-extern "C" HRSRC FindResourceA(HMODULE, LPCSTR, LPCSTR) { return nullptr; }
-extern "C" HGLOBAL LoadResource(HMODULE, HRSRC) { return nullptr; }
-extern "C" LPVOID LockResource(HGLOBAL) { return nullptr; }
-extern "C" DWORD SizeofResource(HMODULE, HRSRC) { return 0; }
+/* --------------------------------------------------------------- resources
+**
+** The game's dialogs live in Commando/chat.rc. The build compiles it with
+** llvm-rc into a Win32 .res file embedded at REBEL_RESOURCE_FILE; this parses
+** that file once and serves FindResource/LoadResource/LockResource from it.
+** .res layout: a sequence of entries, each DataSize, HeaderSize, then TYPE
+** and NAME (0xFFFF+ordinal or a UTF-16 string), then data, DWORD-aligned.
+*/
+#include <vector>
+namespace {
+struct ResEntry {
+  bool type_is_id, name_is_id;
+  WORD type_id, name_id;
+  std::wstring type_name, name_name;
+  const BYTE *data;
+  DWORD size;
+};
+std::vector<BYTE> ResFile;
+std::vector<ResEntry> ResEntries;
+bool ResLoaded = false;
+
+const BYTE *Read_Res_Name(const BYTE *p, const BYTE *end, bool &is_id, WORD &id, std::wstring &name) {
+  if (p + 2 > end)
+    return end;
+  WORD first = (WORD)(p[0] | (p[1] << 8));
+  if (first == 0xFFFF) {
+    is_id = true;
+    id = (WORD)(p[2] | (p[3] << 8));
+    return p + 4;
+  }
+  is_id = false;
+  while (p + 2 <= end) {
+    WORD c = (WORD)(p[0] | (p[1] << 8));
+    p += 2;
+    if (!c)
+      break;
+    name.push_back((wchar_t)c);
+  }
+  return p;
+}
+
+void Load_Resources() {
+  if (ResLoaded)
+    return;
+  ResLoaded = true;
+  const char *path = getenv("REBEL_RESOURCE_FILE");
+  FILE *f = fopen(path ? path : "/rebel/chat.res", "rb");
+  if (!f) {
+    fprintf(stderr, "[win32] resource file not found; dialogs unavailable\n");
+    return;
+  }
+  fseek(f, 0, SEEK_END);
+  long n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  ResFile.resize(n > 0 ? (size_t)n : 0);
+  size_t got = fread(ResFile.data(), 1, ResFile.size(), f);
+  fclose(f);
+  ResFile.resize(got);
+  const BYTE *base = ResFile.data(), *end = base + ResFile.size();
+  const BYTE *p = base;
+  while (p + 8 <= end) {
+    DWORD data_size = p[0] | (p[1] << 8) | (p[2] << 16) | ((DWORD)p[3] << 24);
+    DWORD header_size = p[4] | (p[5] << 8) | (p[6] << 16) | ((DWORD)p[7] << 24);
+    if (header_size < 8 || p + header_size + data_size > end)
+      break;
+    ResEntry e{};
+    const BYTE *q = Read_Res_Name(p + 8, p + header_size, e.type_is_id, e.type_id, e.type_name);
+    q = Read_Res_Name(q, p + header_size, e.name_is_id, e.name_id, e.name_name);
+    e.data = p + header_size;
+    e.size = data_size;
+    if (data_size)
+      ResEntries.push_back(e);
+    size_t next = (size_t)(p - base) + header_size + data_size;
+    p = base + ((next + 3) & ~(size_t)3);
+  }
+}
+
+bool Res_Name_Matches(LPCSTR want, bool is_id, WORD id, const std::wstring &name) {
+  if ((ULONG_PTR)want < 0x10000)
+    return is_id && id == (WORD)(ULONG_PTR)want;
+  if (is_id)
+    return want[0] == '#' && atoi(want + 1) == id;
+  if (strlen(want) != name.size())
+    return false;
+  for (size_t i = 0; i < name.size(); i++)
+    if (towupper((wint_t)name[i]) != towupper((wint_t)(unsigned char)want[i]))
+      return false;
+  return true;
+}
+} // namespace
+
+extern "C" HRSRC FindResourceA(HMODULE, LPCSTR name, LPCSTR type) {
+  Load_Resources();
+  for (const ResEntry &e : ResEntries)
+    if (Res_Name_Matches(type, e.type_is_id, e.type_id, e.type_name) &&
+        Res_Name_Matches(name, e.name_is_id, e.name_id, e.name_name))
+      return (HRSRC)&e;
+  SetLastError(1813); /* ERROR_RESOURCE_TYPE_NOT_FOUND */
+  return nullptr;
+}
+extern "C" HGLOBAL LoadResource(HMODULE, HRSRC res) { return res ? (HGLOBAL)((const ResEntry *)res)->data : nullptr; }
+extern "C" LPVOID LockResource(HGLOBAL res) { return res; }
+extern "C" DWORD SizeofResource(HMODULE, HRSRC res) { return res ? ((const ResEntry *)res)->size : 0; }
 extern "C" DWORD GetFileVersionInfoSizeA(LPCSTR, LPDWORD handle) {
   if (handle)
     *handle = 0;
@@ -845,4 +971,134 @@ extern "C" int GetKeyboardLayoutList(int n, HKL *list) {
   if (n > 0 && list)
     list[0] = GetKeyboardLayout(0);
   return 1;
+}
+
+/* ------------------------------------------------ processes and console */
+
+// No child processes in a browser tab.
+extern "C" BOOL CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD,
+                               LPVOID, LPCSTR, LPSTARTUPINFO, LPPROCESS_INFORMATION pi) {
+  fprintf(stderr, "[win32] CreateProcess(%s %s) not available\n", app ? app : "", cmd ? cmd : "");
+  if (pi)
+    memset(pi, 0, sizeof(*pi));
+  SetLastError(ERROR_FILE_NOT_FOUND);
+  return FALSE;
+}
+extern "C" HANDLE OpenProcess(DWORD, BOOL, DWORD) { return nullptr; }
+extern "C" DWORD GetProcessVersion(DWORD) { return 0x00050001; }
+extern "C" BOOL GetProcessTimes(HANDLE, LPFILETIME c, LPFILETIME e, LPFILETIME k, LPFILETIME u) {
+  FILETIME zero = {0, 0};
+  if (c)
+    GetSystemTimeAsFileTime(c);
+  if (e)
+    *e = zero;
+  if (k)
+    *k = zero;
+  if (u)
+    *u = zero;
+  return TRUE;
+}
+extern "C" BOOL GetExitCodeProcess(HANDLE, LPDWORD code) {
+  if (code)
+    *code = 0;
+  return FALSE;
+}
+extern "C" HANDLE OpenMutexA(DWORD, BOOL, LPCSTR) {
+  SetLastError(ERROR_FILE_NOT_FOUND); // no other instance can exist
+  return nullptr;
+}
+
+// The dedicated-server console maps to stdout/stdin.
+extern "C" BOOL AllocConsole(void) { return TRUE; }
+extern "C" BOOL FreeConsole(void) { return TRUE; }
+extern "C" HANDLE GetStdHandle(DWORD which) { return (HANDLE)(ULONG_PTR)(0x5000 + (which & 0xFF)); }
+extern "C" BOOL SetConsoleTextAttribute(HANDLE, WORD) { return TRUE; }
+extern "C" BOOL SetConsoleCursorPosition(HANDLE, COORD) { return TRUE; }
+extern "C" BOOL SetConsoleTitleA(LPCSTR) { return TRUE; }
+extern "C" BOOL GetConsoleScreenBufferInfo(HANDLE, CONSOLE_SCREEN_BUFFER_INFO *info) {
+  memset(info, 0, sizeof(*info));
+  info->dwSize.X = 80;
+  info->dwSize.Y = 25;
+  info->srWindow.Right = 79;
+  info->srWindow.Bottom = 24;
+  return TRUE;
+}
+extern "C" BOOL WriteConsoleA(HANDLE, const void *buf, DWORD n, LPDWORD written, LPVOID) {
+  fwrite(buf, 1, n, stdout);
+  if (written)
+    *written = n;
+  return TRUE;
+}
+extern "C" BOOL ReadConsoleA(HANDLE, LPVOID, DWORD, LPDWORD read, LPVOID) {
+  if (read)
+    *read = 0;
+  return FALSE;
+}
+
+extern "C" DWORD GetLogicalDriveStringsA(DWORD len, LPSTR buf) {
+  static const char drives[] = "C:\\\0"; // one fixed drive, no CD-ROM
+  if (!buf || len < sizeof(drives))
+    return sizeof(drives);
+  memcpy(buf, drives, sizeof(drives));
+  return sizeof(drives) - 1;
+}
+extern "C" HWND GetTopWindow(HWND) { return nullptr; }
+extern "C" HINSTANCE FindExecutableA(LPCSTR, LPCSTR, LPSTR result) {
+  if (result)
+    result[0] = 0;
+  return (HINSTANCE)SE_ERR_NOASSOC;
+}
+
+wchar_t *_itow(int value, wchar_t *buf, int radix) {
+  char tmp[40];
+  itoa(value, tmp, radix);
+  size_t i = 0;
+  for (; tmp[i]; i++)
+    buf[i] = (wchar_t)tmp[i];
+  buf[i] = 0;
+  return buf;
+}
+
+extern "C" HRSRC FindResourceExA(HMODULE mod, LPCSTR type, LPCSTR name, WORD) {
+  return FindResourceA(mod, name, type); // one language in the embedded .res
+}
+// Accelerators are handled by the engine's own key bindings on the web.
+extern "C" HACCEL LoadAcceleratorsA(HINSTANCE, LPCSTR) { return nullptr; }
+extern "C" BOOL SetConsoleScreenBufferSize(HANDLE, COORD) { return TRUE; }
+extern "C" BOOL FillConsoleOutputAttribute(HANDLE, WORD, DWORD len, COORD, LPDWORD written) {
+  if (written)
+    *written = len;
+  return TRUE;
+}
+extern "C" BOOL FillConsoleOutputCharacterA(HANDLE, CHAR, DWORD len, COORD, LPDWORD written) {
+  if (written)
+    *written = len;
+  return TRUE;
+}
+extern "C" DWORD WaitForInputIdle(HANDLE, DWORD) { return WAIT_FAILED; }
+extern "C" LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER) { return nullptr; }
+extern "C" DWORD SearchPathA(LPCSTR path, LPCSTR file, LPCSTR ext, DWORD len, LPSTR buf, LPSTR *filepart) {
+  char name[MAX_PATH];
+  snprintf(name, sizeof(name), "%s%s%s", path && *path ? path : "", path && *path ? "/" : "", file ? file : "");
+  if (ext && !strchr(file ? file : "", '.'))
+    strncat(name, ext, sizeof(name) - strlen(name) - 1);
+  if (GetFileAttributesA(name) == INVALID_FILE_ATTRIBUTES)
+    return 0;
+  return GetFullPathNameA(name, len, buf, filepart);
+}
+extern "C" DWORD GetWindowThreadProcessId(HWND, LPDWORD pid) {
+  if (pid)
+    *pid = GetCurrentProcessId();
+  return GetCurrentThreadId();
+}
+// No interactive console: input functions report "no key".
+extern "C" int _getch(void) { return 0; }
+extern "C" int _getche(void) { return 0; }
+extern "C" int _kbhit(void) { return 0; }
+extern "C" int cprintf(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vprintf(fmt, ap);
+  va_end(ap);
+  return n;
 }

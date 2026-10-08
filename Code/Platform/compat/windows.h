@@ -1303,7 +1303,14 @@ int GetKeyboardLayoutList(int n, HKL *list);
 
 /* SEH types: declared so prototypes compile; never populated on the web. */
 typedef struct _CONTEXT CONTEXT, *PCONTEXT;
-typedef struct _EXCEPTION_RECORD EXCEPTION_RECORD, *PEXCEPTION_RECORD;
+typedef struct _EXCEPTION_RECORD {
+    DWORD ExceptionCode;
+    DWORD ExceptionFlags;
+    struct _EXCEPTION_RECORD *ExceptionRecord;
+    PVOID ExceptionAddress;
+    DWORD NumberParameters;
+    ULONG_PTR ExceptionInformation[15];
+} EXCEPTION_RECORD, *PEXCEPTION_RECORD;
 typedef struct _EXCEPTION_POINTERS {
     PEXCEPTION_RECORD ExceptionRecord;
     PCONTEXT ContextRecord;
@@ -1311,3 +1318,122 @@ typedef struct _EXCEPTION_POINTERS {
 #define EXCEPTION_EXECUTE_HANDLER 1
 #define EXCEPTION_CONTINUE_SEARCH 0
 #define EXCEPTION_CONTINUE_EXECUTION (-1)
+
+#define DLL_PROCESS_DETACH 0
+#define DLL_PROCESS_ATTACH 1
+#define DLL_THREAD_ATTACH 2
+#define DLL_THREAD_DETACH 3
+
+/* ---------------------------------------------- processes, console, misc */
+typedef struct _STARTUPINFOA {
+    DWORD cb;
+    LPSTR lpReserved, lpDesktop, lpTitle;
+    DWORD dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+    WORD wShowWindow, cbReserved2;
+    LPBYTE lpReserved2;
+    HANDLE hStdInput, hStdOutput, hStdError;
+} STARTUPINFO, STARTUPINFOA, *LPSTARTUPINFO;
+typedef struct _PROCESS_INFORMATION {
+    HANDLE hProcess, hThread;
+    DWORD dwProcessId, dwThreadId;
+} PROCESS_INFORMATION, *LPPROCESS_INFORMATION;
+typedef struct _COORD { SHORT X, Y; } COORD, *PCOORD;
+typedef struct _SMALL_RECT { SHORT Left, Top, Right, Bottom; } SMALL_RECT;
+typedef struct _CONSOLE_SCREEN_BUFFER_INFO {
+    COORD dwSize, dwCursorPosition;
+    WORD wAttributes;
+    SMALL_RECT srWindow;
+    COORD dwMaximumWindowSize;
+} CONSOLE_SCREEN_BUFFER_INFO;
+#define STD_INPUT_HANDLE ((DWORD)-10)
+#define STD_OUTPUT_HANDLE ((DWORD)-11)
+#define STD_ERROR_HANDLE ((DWORD)-12)
+#define FOREGROUND_BLUE 0x0001
+#define FOREGROUND_GREEN 0x0002
+#define FOREGROUND_RED 0x0004
+#define FOREGROUND_INTENSITY 0x0008
+#define BACKGROUND_BLUE 0x0010
+#define BACKGROUND_GREEN 0x0020
+#define BACKGROUND_RED 0x0040
+#define BACKGROUND_INTENSITY 0x0080
+#define STARTF_USESHOWWINDOW 0x00000001
+#define CREATE_NEW_CONSOLE 0x00000010
+#define DETACHED_PROCESS 0x00000008
+#define PROCESS_TERMINATE 0x0001
+#define PROCESS_QUERY_INFORMATION 0x0400
+#define MUTEX_ALL_ACCESS 0x1F0001
+#define MAX_COMPUTERNAME_LENGTH 15
+#define UNLEN 256
+#define TIME_FORCE24HOURFORMAT 0x00000008
+#define SUBLANG_NEUTRAL 0x00
+#define SE_ERR_NOASSOC 31
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+BOOL CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit, DWORD flags,
+                    LPVOID env, LPCSTR dir, LPSTARTUPINFO si, LPPROCESS_INFORMATION pi);
+#define CreateProcess CreateProcessA
+HANDLE OpenProcess(DWORD access, BOOL inherit, DWORD pid);
+DWORD GetProcessVersion(DWORD pid);
+BOOL GetProcessTimes(HANDLE p, LPFILETIME create, LPFILETIME exit, LPFILETIME kernel, LPFILETIME user);
+BOOL GetExitCodeProcess(HANDLE p, LPDWORD code);
+HANDLE OpenMutexA(DWORD access, BOOL inherit, LPCSTR name);
+#define OpenMutex OpenMutexA
+BOOL AllocConsole(void);
+BOOL FreeConsole(void);
+HANDLE GetStdHandle(DWORD which);
+BOOL SetConsoleTextAttribute(HANDLE h, WORD attr);
+BOOL SetConsoleCursorPosition(HANDLE h, COORD pos);
+BOOL SetConsoleTitleA(LPCSTR title);
+#define SetConsoleTitle SetConsoleTitleA
+BOOL GetConsoleScreenBufferInfo(HANDLE h, CONSOLE_SCREEN_BUFFER_INFO *info);
+BOOL WriteConsoleA(HANDLE h, const void *buf, DWORD n, LPDWORD written, LPVOID reserved);
+#define WriteConsole WriteConsoleA
+BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD n, LPDWORD read, LPVOID control);
+#define ReadConsole ReadConsoleA
+DWORD GetLogicalDriveStringsA(DWORD len, LPSTR buf);
+#define GetLogicalDriveStrings GetLogicalDriveStringsA
+HWND GetTopWindow(HWND w);
+HINSTANCE FindExecutableA(LPCSTR file, LPCSTR dir, LPSTR result);
+#define FindExecutable FindExecutableA
+#ifdef __cplusplus
+}
+#endif
+wchar_t *_itow(int value, wchar_t *buf, int radix);
+
+/* Real windows.h pulls in Winsock unless WIN32_LEAN_AND_MEAN; the engine
+** relies on that in places, and including it always is harmless here. */
+#include "winsock.h"
+
+#define KF_EXTENDED 0x0100
+#define KF_ALTDOWN 0x2000
+#define KF_REPEAT 0x4000
+#define KF_UP 0x8000
+typedef LONG (*LPTOP_LEVEL_EXCEPTION_FILTER)(struct _EXCEPTION_POINTERS *info);
+#ifdef __cplusplus
+extern "C" {
+#endif
+HRSRC FindResourceExA(HMODULE mod, LPCSTR type, LPCSTR name, WORD lang);
+#define FindResourceEx FindResourceExA
+HACCEL LoadAcceleratorsA(HINSTANCE inst, LPCSTR name);
+#define LoadAccelerators LoadAcceleratorsA
+BOOL SetConsoleScreenBufferSize(HANDLE h, COORD size);
+BOOL FillConsoleOutputAttribute(HANDLE h, WORD attr, DWORD len, COORD at, LPDWORD written);
+BOOL FillConsoleOutputCharacterA(HANDLE h, CHAR c, DWORD len, COORD at, LPDWORD written);
+#define FillConsoleOutputCharacter FillConsoleOutputCharacterA
+DWORD WaitForInputIdle(HANDLE process, DWORD ms);
+LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER filter);
+DWORD SearchPathA(LPCSTR path, LPCSTR file, LPCSTR ext, DWORD len, LPSTR buf, LPSTR *filepart);
+#define SearchPath SearchPathA
+DWORD GetWindowThreadProcessId(HWND w, LPDWORD pid);
+int _getch(void);
+int _getche(void);
+int _kbhit(void);
+int cprintf(const char *fmt, ...);
+#ifdef __cplusplus
+}
+#endif
+#define getch _getch
+#define kbhit _kbhit
+#define _cprintf cprintf

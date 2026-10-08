@@ -50,6 +50,16 @@
 #define __forceinline inline __attribute__((always_inline))
 #define __declspec(x)
 
+/* SAL annotations are documentation-only. */
+#define _In_
+#define _In_opt_
+#define _Out_
+#define _Out_opt_
+#define _Inout_
+#define _Inout_opt_
+#define _In_z_
+#define _Printf_format_string_
+
 /* __int8/16/32/64 are builtin keywords under -fms-extensions */
 
 #define stricmp strcasecmp

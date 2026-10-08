@@ -1255,7 +1255,7 @@ void WOLBuddyMgr::HandleNotification(PageMessage &page) {
         DECLINE_REASON reason = DECLINE_BYUSER;
 
         // Grab the reason code
-        const WCHAR *codeString = message + DECLINE_CMD_LEN;
+        const WCHAR *codeString = message.Peek_Buffer() + DECLINE_CMD_LEN;
         int code = _wtoi(codeString);
 
         if (code > DECLINE_MIN && code < DECLINE_MAX) {

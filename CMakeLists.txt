@@ -26,6 +26,10 @@ if(REBEL_PORTABLE)
     # _WINDOWS: the compat layer provides Win32, so take the engine's Windows paths.
     add_compile_definitions(REBEL_PORTABLE _WINDOWS)
     add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/rebel_portable.h" -fwasm-exceptions -pthread)
+    # C++ TUs also get the Win32/COM declarations at global scope up front, as
+    # the Windows SDK headers effectively were. WWOnline includes wolapi.h
+    # inside "namespace WOL {}", which would otherwise capture first includes.
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${CMAKE_SOURCE_DIR}/Code/Platform/compat/ole2.h>")
     add_link_options(-fwasm-exceptions -pthread)
     add_compile_options(-Wno-everything -fms-extensions -fno-delayed-template-parsing)
     # Windows system / proprietary SDK libraries become empty targets; the

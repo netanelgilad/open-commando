@@ -273,10 +273,14 @@ unsigned int __stdcall FirewallHelperClass::NAT_Thread_Start(void *thisptr) {
 
   Register_Thread_ID(GetCurrentThreadId(), "Firewall thread");
 
+#ifdef REBEL_PORTABLE
+  thread_exit_code = ((FirewallHelperClass *)thisptr)->NAT_Thread_Main_Loop(); // no SEH
+#else
   __try {
     thread_exit_code = ((FirewallHelperClass *)thisptr)->NAT_Thread_Main_Loop();
   } __except (Exception_Handler(GetExceptionCode(), GetExceptionInformation())) {
   };
+#endif
 
   Unregister_Thread_ID(GetCurrentThreadId(), "Firewall thread");
 
@@ -3078,6 +3082,7 @@ int FirewallHelperClass::Negotiate_Port(void) {
   return (FW_RESULT_FAILED);
 }
 
+#ifndef REBEL_PORTABLE // SNMP (MIB-II) router queries
 /*
 ** Function definitions for the MIB-II entry points.
 */
@@ -3470,6 +3475,10 @@ bool FirewallHelperClass::Get_Local_Chat_Connection_Address(void) {
 
   return (found);
 }
+#else  // REBEL_PORTABLE
+// No SNMP/MIB-II in a browser: the chat-connection address can't be probed.
+bool FirewallHelperClass::Get_Local_Chat_Connection_Address(void) { return false; }
+#endif // REBEL_PORTABLE
 
 /***********************************************************************************************
  * FirewallHelperClass::Get_Local_Address -- Get local chat address ip as a long               *

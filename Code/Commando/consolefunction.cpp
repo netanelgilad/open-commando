@@ -2263,7 +2263,11 @@ public:
   virtual const char *Get_Help(void) { return "BREAK - break execution. Do not use this just for fun."; }
   virtual void Activate(const char *input) {
     Print("Breaking execution on demand.\n");
+#ifdef REBEL_PORTABLE
+    __builtin_debugtrap();
+#else
     _asm int 0x03;
+#endif
   }
 };
 

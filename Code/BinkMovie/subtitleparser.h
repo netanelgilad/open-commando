@@ -51,6 +51,9 @@ public:
   DynamicVectorClass<SubTitleClass *> *Get_Sub_Titles(const char *moviename);
 
 private:
+#ifdef LINE_MAX
+#undef LINE_MAX // POSIX <limits.h> macro collides with this enum
+#endif
   enum { LINE_MAX = 1024 };
 
   typedef struct tagTokenHook {

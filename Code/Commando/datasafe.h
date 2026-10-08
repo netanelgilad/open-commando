@@ -785,12 +785,23 @@ private:
 **
 **
 */
+#ifdef REBEL_PORTABLE
+// Explicit specializations of static members need template<> and an
+// initializer to be definitions in standard C++ ({} keeps the zero init).
+#define DECLARE_DATA_SAFE(type)                                                                                        \
+  DataSafeClass<type> DataSafe##type;                                                                                  \
+  template <> int DataSafeClass<type>::Type{};                                                                         \
+  template <> char DataSafeClass<type>::ReturnList[MAX_OBJECT_COPIES][sizeof(type)]{};                                 \
+  template <> int DataSafeClass<type>::ReturnIndex{};                                                                  \
+  template <> int DataSafeClass<type>::MinSlop{};
+#else
 #define DECLARE_DATA_SAFE(type)                                                                                        \
   DataSafeClass<type> DataSafe##type;                                                                                  \
   int DataSafeClass<type>::Type;                                                                                       \
   char DataSafeClass<type>::ReturnList[MAX_OBJECT_COPIES][sizeof(type)];                                               \
   int DataSafeClass<type>::ReturnIndex;                                                                                \
   int DataSafeClass<type>::MinSlop;
+#endif
 
 /*
 **
