@@ -356,9 +356,10 @@ extern "C" void Rebel_Audio_Update(void);
 // The game pumps messages once per frame; when the queue is empty, hand the
 // browser a turn (present the frame, deliver input) at most every ~4 ms.
 static void Maybe_Yield_To_Browser() {
+  extern DWORD Rebel_Last_Frame_Yield;
   static DWORD last = 0;
   DWORD now = GetTickCount();
-  if (now - last >= 4) {
+  if (now - Rebel_Last_Frame_Yield >= 100 && now - last >= 100) {
     Rebel_Audio_Update(); // refill streamed music before yielding
     Rebel_Yield(0);
     last = GetTickCount();
@@ -371,8 +372,10 @@ extern "C" BOOL PeekMessageA(LPMSG msg, HWND w, UINT min, UINT max, UINT remove)
     std::lock_guard<std::recursive_mutex> g(Lock);
     empty = Queue.empty() && !QuitPosted;
   }
+  // Long stretches without a presented frame (loading) still give the
+  // browser a turn now and then so the page stays responsive.
   if (empty)
-    Maybe_Yield_To_Browser(); // events arriving during the yield land in Queue
+    Maybe_Yield_To_Browser();
   std::lock_guard<std::recursive_mutex> g(Lock);
   if (QuitPosted && Queue.empty()) {
     memset(msg, 0, sizeof(*msg));

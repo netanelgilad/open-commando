@@ -19,6 +19,9 @@
 #define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
 #endif
 
+extern "C" void Rebel_Frame_Yield(void);
+DWORD Rebel_Last_Frame_Yield = 0;
+
 namespace rebel_d3d {
 
 HRESULT Copy_Surface(Surface *dst, const RECT *dst_rect, Surface *src, const RECT *src_rect, bool linear);
@@ -405,6 +408,9 @@ HRESULT Device::Present(const RECT *, const RECT *, HWND, const void *) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   // Re-bound before the next draw/clear.
   FrameCount++;
+  Rebel_Last_Frame_Yield = GetTickCount();
+  Rebel_Frame_Yield();
+  Rebel_Last_Frame_Yield = GetTickCount();
 #ifdef __EMSCRIPTEN__
   double now = emscripten_get_now();
   if (now - LastReport > 5000.0) {

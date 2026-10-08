@@ -147,10 +147,37 @@ extern "C" void Rebel_Yield(DWORD ms) {
 #endif
 }
 
+#ifdef __EMSCRIPTEN__
+// Wait for the next display frame (vsync). Falls back to a short timer when
+// the tab is hidden, where requestAnimationFrame does not fire.
+EM_ASYNC_JS(void, Rebel_JS_Wait_Frame, (void), {
+  await new Promise(function(resolve) {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible' && typeof requestAnimationFrame === 'function')
+      requestAnimationFrame(function() { resolve(); });
+    else
+      setTimeout(resolve, 16);
+  });
+});
+#endif
+
+extern "C" void Rebel_Audio_Update(void);
+
+// Called once per presented frame: the one place the game hands the browser
+// a turn (show the frame, deliver input, run timers and audio).
+extern "C" void Rebel_Frame_Yield(void) {
+#ifdef __EMSCRIPTEN__
+  Rebel_Audio_Update();
+  if (emscripten_has_asyncify() && emscripten_is_main_browser_thread())
+    Rebel_JS_Wait_Frame();
+#endif
+}
+
 extern "C" void Sleep(DWORD ms) {
 #ifdef __EMSCRIPTEN__
   if (emscripten_is_main_browser_thread()) {
-    Rebel_Yield(ms);
+    // Sleep(0) is a "yield the CPU" hint; frames already yield in Present.
+    if (ms > 0)
+      Rebel_Yield(ms);
     return;
   }
 #endif
