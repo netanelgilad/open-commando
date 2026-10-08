@@ -52,9 +52,14 @@ where the shortcut lives and what "done" looks like.
 
 ## Performance / build
 
-- **Gameplay frame rate**: about 6-7 fps in M13 at roughly 340 draws per frame
-  (menus run at about 34 fps). Profile the D3D9-on-WebGL2 layer's per-draw cost
-  first (state diffing, uniform uploads, buffer re-uploads).
+- **Frame pacing**: the game paces itself to 60 fps and yields with a zero-delay
+  task; it no longer waits on requestAnimationFrame. On this Mac mini, rAF
+  ticked at about 5 Hz during missions. M13 now runs at roughly 40-47 fps,
+  limited by game CPU work (about 20 ms per frame); GPU time is about 1 ms per
+  frame. `?raf` restores rAF pacing for comparison. Next target: CPU per frame
+  (profile with tools/browser-test/mission-profile.mjs).
+- **Engine debug logging** still costs CPU: WWDEBUG output, script spam such as
+  M00_Play_Sound and "NULL Script Ptr". A release build (no WWDEBUG) removes it.
 - **Level load** takes about 90 s (I/O through the OPFS proxy, plus asset parsing).
 - **Debug build**: shipped with `-sASSERTIONS=1 -sSTACK_OVERFLOW_CHECK=2` and
   WWDEBUG. Asserts are logged and play continues; `Commando_Assert_Handler` no
@@ -62,3 +67,10 @@ where the shortcut lives and what "done" looks like.
   build (and possibly JSPI instead of ASYNCIFY) is still to do.
 - **Pointer lock only**: mouse-look needs pointer lock (click the canvas).
   Without it, for example with `?nolock`, the mouse only drives the menu cursor.
+
+## Open bugs
+
+- **Intermittent hang in the M13 intro cinematic**, about 55-60 s of game time.
+  Seen twice before the varargs and pacing fixes and not reproduced since.
+  tools/browser-test/input.mjs has a watchdog that dumps the hot stacks if the
+  page goes quiet.
