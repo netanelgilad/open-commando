@@ -8,6 +8,15 @@ Conquer™ Renegade, v1.037, e.g. from Steam).
 Not affiliated with or endorsed by Electronic Arts. See [NOTICE.md](NOTICE.md)
 and [LICENSE.md](LICENSE.md) (GPL v3 with EA's additional terms).
 
+**Play:** https://open-commando.netanelgilad.workers.dev
+
+1. Use a desktop Chrome or Edge (Firefox and Safari should work but are less
+   tested).
+2. Choose your game's install folder. On Steam: Library → right-click the
+   game → Manage → Browse local files.
+3. Wait while it copies the ~1.3 GB of game files into the browser's private
+   storage, once. Nothing is uploaded.
+
 ## Status
 
 - **Complete single-player campaign:** all 12 missions load, play and
@@ -70,6 +79,20 @@ In game:
   game);
 - click: capture the mouse.
 
+## Hosting your own public copy
+
+```sh
+tools/build-web.sh release && tools/build-bink.sh
+tools/deploy-web.sh             # -> dist/ (page, engine, cutscene decoder, _headers)
+tools/deploy-web.sh --publish   # Cloudflare Workers static assets (wrangler.jsonc)
+```
+
+- `dist/` holds code only.
+- Players import their own game files in the page, and cutscenes are decoded
+  in the page from their `.bik` files.
+- Any static host works if it can send the `_headers` (COOP/COEP).
+- The page links to the exact source commit it was built from.
+
 ## Development
 
 - `tools/build-web.sh debug`: build with asserts and engine debug logs,
@@ -98,6 +121,20 @@ The project aimed at improving the source code of CnC: Renegade for running on m
 * DirectX 9 support.
 
 See [CHANGES.md](CHANGES.md) for full changelog.
+
+## Hosting your own public copy
+
+```sh
+tools/build-web.sh release && tools/build-bink.sh
+tools/deploy-web.sh             # -> dist/ (page, engine, cutscene decoder, _headers)
+tools/deploy-web.sh --publish   # Cloudflare Workers static assets (wrangler.jsonc)
+```
+
+- `dist/` holds code only.
+- Players import their own game files in the page, and cutscenes are decoded
+  in the page from their `.bik` files.
+- Any static host works if it can send the `_headers` (COOP/COEP).
+- The page links to the exact source commit it was built from.
 
 ## Development and Dependencies
 
