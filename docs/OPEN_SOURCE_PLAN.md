@@ -154,3 +154,66 @@ get their game data into the browser:
 - Truly original assets (our own designs) can be published under any license
   we choose (e.g. CC BY-SA).
 - This is decision 14 in `REMASTER_PLAN.md`.
+
+## Commercial route (if we ever sell our own version)
+
+Question answered on 2026-10-09: with assets that are entirely our own, can
+we sell the game? Yes, within these limits. Not legal advice: have a lawyer
+review before a commercial launch.
+
+**Allowed**
+- Selling it (Steam, own store, paid web access). The GPL explicitly allows
+  charging for copies.
+- Keeping our own assets proprietary. Models, textures, maps, audio, music,
+  story and UI art are separate works from the engine and can be under any
+  license, including "all rights reserved". This is the Doom/Quake model:
+  GPL engine, sold content.
+- Keeping server-side services closed (lobby, matchmaking, accounts,
+  Durable Objects). GPLv3 (unlike AGPL) only applies when the program is
+  distributed. Services we only run don't have to be published.
+
+**Required / limiting**
+- **The engine stays GPLv3 + EA's terms forever.** It is EA's code plus our
+  modifications, so we can't relicense it as proprietary.
+  - Every buyer must get, or be offered, the complete corresponding source of
+    the engine they received, including our changes and build scripts. A
+    link to the exact public commit is enough.
+  - Buyers may share or resell that engine. The moat is the content, not the
+    code.
+- **Distributed servers are GPL too.** A dedicated server binary we hand to
+  players or hosts needs its source available. Servers we only run don't.
+- **EA's additional terms apply even with zero EA content:**
+  - no EA trademarks in the product name, store page, marketing or domain;
+  - no claim of affiliation or endorsement;
+  - mark it as a modified version of EA's released program and keep EA's
+    copyright notice and terms in the source;
+  - indemnity: if we give buyers warranties or other contractual promises,
+    we must cover EA for liability those create. Ship an "as-is" EULA for
+    the engine part and keep warranties minimal.
+- **"Nothing from EA" includes IP beyond files:** GDI, Nod, Tiberium,
+  Havoc and other characters, the story, unit/vehicle/structure designs, and
+  recognizable map layouts. The code also contains hard-coded EA-flavored
+  names and strings (team names, UI text, version strings). A commercial
+  product renames them and doesn't depend on them.
+- **Platforms:**
+  - Steam and the web are fine with GPL engines.
+  - Apple's App Store has historically conflicted with the GPL (extra usage
+    restrictions); avoid depending on it, or get advice first.
+  - Console stores (closed SDKs, NDAs) are generally incompatible with
+    shipping GPL code.
+- **The license can't be revoked:** EA's GPL release stays valid for us as
+  long as we follow its terms.
+
+**What a commercial release needs (on top of the public checklist above)**
+1. A full original asset set (see `REMASTER_PLAN.md`, decision 14),
+   audited for EA-derived designs and names.
+2. EA-flavored hard-coded strings and names removed from the engine.
+3. A product name and branding cleared for trademarks: no EA marks, and a
+   search for conflicts with others.
+4. Licensing split documented:
+   - engine GPLv3 + EA terms, with the source link in the game and store
+     page;
+   - content under our own license;
+   - EULA covering content and services, with the engine "as is".
+5. A lawyer's review of the EA section 7 terms (indemnity) and the store
+   agreements.
