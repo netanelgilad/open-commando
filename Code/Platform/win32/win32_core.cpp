@@ -229,8 +229,11 @@ extern "C" __attribute__((weak)) void Rebel_Run_Pending_Actions(void);
 
 extern "C" double Rebel_Stat_Audio_Ms = 0; // reported with the frame stats (d3d9_device.cpp)
 
+extern "C" void Rebel_Registry_Flush(void);
+
 extern "C" void Rebel_Frame_Yield(void) {
 #ifdef __EMSCRIPTEN__
+  Rebel_Registry_Flush(); // settings changed this frame (win32_registry.cpp)
   double t = emscripten_get_now();
   Rebel_Audio_Update();
   Rebel_Stat_Audio_Ms += emscripten_get_now() - t;

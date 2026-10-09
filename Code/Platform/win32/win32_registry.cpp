@@ -130,7 +130,7 @@ void Load() {
 
 // Written to a temporary file and renamed over the store, so a tab closed
 // mid-write can't leave a truncated registry (all settings lost).
-void Save() {
+void Write_Store() {
   std::string tmp = std::string(Store_Path()) + ".tmp";
   FILE *f = fopen(tmp.c_str(), "wb");
   if (!f)
@@ -153,6 +153,18 @@ void Save() {
     fprintf(stderr, "[registry] could not save %s\n", Store_Path());
     remove(tmp.c_str());
   }
+}
+
+// In the browser, changes are written at most once per frame
+// (Rebel_Registry_Flush from the frame yield): the game sets dozens of values
+// in a row at startup and each write is several OPFS round trips.
+bool Dirty = false;
+void Save() {
+#ifdef __EMSCRIPTEN__
+  Dirty = true;
+#else
+  Write_Store();
+#endif
 }
 
 bool Key_Exists(const std::string &path) {
@@ -437,3 +449,11 @@ extern "C" LONG RegQueryInfoKeyA(HKEY key, LPSTR, LPDWORD, LPDWORD, LPDWORD subk
 }
 
 extern "C" LONG RegFlushKey(HKEY) { return ERROR_SUCCESS; }
+
+extern "C" void Rebel_Registry_Flush(void) {
+  std::lock_guard<std::recursive_mutex> g(Lock);
+  if (!Dirty)
+    return;
+  Dirty = false;
+  Write_Store();
+}

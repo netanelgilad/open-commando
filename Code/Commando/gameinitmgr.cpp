@@ -90,8 +90,17 @@
 static void _reload_game_configuration_files(void);
 
 // Defines.
+#ifdef REBEL_PORTABLE
+// These spin the main thread while the audio system "catches up". On Windows
+// Miles mixed on its own thread meanwhile; in the browser audio is serviced
+// between frames, so spinning only froze the page (3.5 s per campaign start).
+// One service pass each is all it does here.
+#define PRE_SERVICE_TIME 1 // Time in milliseconds.
+#define POST_SERVICE_TIME 1 // Time in milliseconds.
+#else
 #define PRE_SERVICE_TIME 1500 // Time in milliseconds.
 #define POST_SERVICE_TIME 250 // Time in milliseconds.
+#endif
 
 ////////////////////////////////////////////////////////////////
 //	Static member initialization

@@ -260,6 +260,7 @@ const resumeAudio = () => audioContexts.forEach((c) => c.state !== 'running' && 
 
 let movieDone = null;
 Module.rebelPlayMovie = (name, done) => {
+  log('[movie] play ' + name);
   movieDone = done;
   movie.src = 'movies/' + encodeURIComponent(name.toLowerCase()) + '.webm';
   movie.style.display = 'block';
