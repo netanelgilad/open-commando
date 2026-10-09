@@ -121,8 +121,32 @@ struct FileObject : RebelHandle {
   long long window_start = 0;
   size_t window_len = 0;
   static constexpr size_t WINDOW = 256 * 1024;
+  // Writable handles buffer writes: saves are thousands of tiny chunk writes
+  // and each write is a synchronous round trip to the OPFS thread (an
+  // autosave froze the page for 25+ s). Writes are sequential at the fd's
+  // position, so flushing before anything that depends on the position or
+  // size (read, seek, truncate, stat, sync, close) keeps the semantics.
+  std::vector<char> pending;
+  static constexpr size_t WRITE_BUFFER = 1024 * 1024;
+  bool Flush_Writes() {
+    size_t done = 0;
+    while (done < pending.size()) {
+      ssize_t w = ::write(fd, pending.data() + done, pending.size() - done);
+      if (w < 0) {
+        if (errno == EINTR)
+          continue;
+        pending.clear();
+        return false;
+      }
+      done += (size_t)w;
+    }
+    pending.clear();
+    return true;
+  }
   FileObject() : RebelHandle(Kind::File) {}
   void Close() override {
+    if (fd >= 0 && !pending.empty())
+      Flush_Writes();
     if (fd >= 0) {
       if (!pool_key.empty())
         Pool().Release(pool_key, fd);
@@ -291,6 +315,8 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read_out, LPOVER
   }
   size_t total = 0;
   while (total < n) {
+    if (!f->pending.empty())
+      f->Flush_Writes();
     ssize_t r = ::read(f->fd, (char *)buf + total, n - total);
     if (r < 0) {
       if (errno == EINTR)
@@ -315,19 +341,13 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD written, LPOVE
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
   }
-  size_t total = 0;
-  while (total < n) {
-    ssize_t w = ::write(f->fd, (const char *)buf + total, n - total);
-    if (w < 0) {
-      if (errno == EINTR)
-        continue;
-      Fail_Errno();
-      return FALSE;
-    }
-    total += (size_t)w;
+  f->pending.insert(f->pending.end(), (const char *)buf, (const char *)buf + n);
+  if (f->pending.size() >= FileObject::WRITE_BUFFER && !f->Flush_Writes()) {
+    Fail_Errno();
+    return FALSE;
   }
   if (written)
-    *written = (DWORD)total;
+    *written = n;
   return TRUE;
 }
 
@@ -352,6 +372,8 @@ extern "C" DWORD SetFilePointer(HANDLE h, LONG dist, PLONG disthigh, DWORD metho
     SetLastError(ERROR_SUCCESS);
     return (DWORD)np;
   }
+  if (!f->pending.empty())
+    f->Flush_Writes();
   off_t pos = ::lseek(f->fd, (off_t)off, whence);
   if (pos < 0) {
     Fail_Errno();
@@ -367,6 +389,8 @@ extern "C" BOOL SetEndOfFile(HANDLE h) {
   FileObject *f = As_File(h);
   if (!f)
     return FALSE;
+  if (!f->pending.empty())
+    f->Flush_Writes();
   off_t pos = ::lseek(f->fd, 0, SEEK_CUR);
   return ftruncate(f->fd, pos) == 0;
 }
@@ -379,6 +403,8 @@ extern "C" DWORD GetFileSize(HANDLE h, LPDWORD high) {
     return (DWORD)f->size;
   }
   struct stat st;
+  if (f && !f->pending.empty())
+    f->Flush_Writes();
   if (!f || fstat(f->fd, &st) != 0) {
     SetLastError(ERROR_INVALID_HANDLE);
     return INVALID_FILE_SIZE;
@@ -391,6 +417,8 @@ extern "C" DWORD GetFileSize(HANDLE h, LPDWORD high) {
 extern "C" BOOL GetFileTime(HANDLE h, LPFILETIME c, LPFILETIME a, LPFILETIME w) {
   FileObject *f = As_File(h);
   struct stat st;
+  if (f && !f->pending.empty())
+    f->Flush_Writes();
   if (!f || fstat(f->fd, &st) != 0)
     return FALSE;
   FILETIME ft;
@@ -409,6 +437,8 @@ extern "C" BOOL SetFileTime(HANDLE, const FILETIME *, const FILETIME *, const FI
 extern "C" BOOL GetFileInformationByHandle(HANDLE h, LPBY_HANDLE_FILE_INFORMATION info) {
   FileObject *f = As_File(h);
   struct stat st;
+  if (f && !f->pending.empty())
+    f->Flush_Writes();
   if (!f || fstat(f->fd, &st) != 0)
     return FALSE;
   memset(info, 0, sizeof(*info));
@@ -424,6 +454,8 @@ extern "C" BOOL GetFileInformationByHandle(HANDLE h, LPBY_HANDLE_FILE_INFORMATIO
 
 extern "C" BOOL FlushFileBuffers(HANDLE h) {
   FileObject *f = As_File(h);
+  if (f && !f->pending.empty())
+    f->Flush_Writes();
   return f && fsync(f->fd) == 0;
 }
 
