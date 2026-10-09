@@ -84,6 +84,8 @@ the main menu ~2.5 s.
     round trips), and their descriptors are pooled.
   - Lookups of absent files are answered from the directory cache.
   - Registry writes are batched to once per frame.
+  - Other writes are buffered, and files created for writing (saves) live in
+    memory until closed: an autosave took 25 s before and takes ~0.1 s now.
 - **Not done:** JSPI instead of ASYNCIFY (smaller and faster wasm), not
   needed at current frame times.
 - **Pointer lock only:** mouse-look needs pointer lock (click the canvas).
@@ -115,7 +117,13 @@ Browser tests are in `tools/browser-test/`, headless Chromium at 1280x800:
 
 ## Open bugs
 
-- **Intermittent hang in the M13 intro cinematic**, about 55-60 s of game time.
-  Seen twice before the varargs and pacing fixes and not reproduced since.
-  tools/browser-test/input.mjs has a watchdog that dumps the hot stacks if the
-  page goes quiet.
+- **Rare hang in the M13 intro cinematic** (main thread busy, about 55-60 s
+  in).
+  - Seen twice before the varargs and pacing fixes, and once on 2026-10-09 in
+    roughly 25 intro runs.
+  - It hasn't reproduced since, including 12 runs under the debugger or
+    tracing.
+  - A watchdog thread (`main_web.cpp`) now prints `[hang] main thread stuck
+    for N s; last step: ...; scopes: ...` (the engine's WWPROFILE scope chain)
+    to the console after 10 s without progress.
+  - The next occurrence will say where it is.
