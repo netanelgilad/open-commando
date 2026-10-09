@@ -11,6 +11,7 @@
   #movie { position: fixed; inset: 0; width: 100%; height: 100%; background: #000; object-fit: contain; display: none; z-index: 5; }
   #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #000; z-index: 10; text-align: center; padding: 24px; }
   #overlay h1 { font-size: 20px; font-weight: 600; margin: 0; color: #e6e6e6; letter-spacing: .02em; }
+  #hint { font-size: 12px; color: #888; max-width: 640px; }
   #status { max-width: 640px; white-space: pre-wrap; }
   progress { width: min(480px, 80vw); height: 10px; }
   button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid #555; background: #1c1c1c; color: #eee; cursor: pointer; }
@@ -29,6 +30,7 @@
   <div id="status">Checking game data…</div>
   <progress id="progress" max="1" value="0" hidden></progress>
   <button id="start" hidden>Play</button>
+  <div id="hint">Click the game to capture the mouse · Alt+Enter: fullscreen (keeps Ctrl and Esc in the game) · F8: frame rate</div>
 </div>
 <pre id="log"></pre>
 <div id="fps"></div>

@@ -36,6 +36,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "dialogmgr.h"
+#include <cstdio>
 #include "dialogbase.h"
 #include "childdialog.h"
 #include "dx8wrapper.h"
@@ -758,6 +759,14 @@ void DialogMgrClass::Flush_Dialogs(void) {
   TransitionDialog = NULL;
   PendingActiveDialog = NULL;
   REF_PTR_RELEASE(Transition);
+
+  //
+  //	Set_Active_Dialog (NULL) above only queues the switch when the old
+  // dialog has an outro transition, and that transition was just dropped:
+  // without this the ended dialog stays "active" and keeps getting keys
+  // (Escape in combat went to the main menu's Quit prompt).
+  //
+  ActiveDialog = NULL;
 
   //
   //	Release our hold on the transitioning dialogs

@@ -18,7 +18,7 @@ page.on('console', (m) => {
   const t = m.text();
   if (/MainMenuDialogClass: started/.test(t)) menuAt = Date.now();
   if (/\[debug\] star at/.test(t)) starSeen = true;
-  if (/\[debug\]|\[audio\]|\[d3d9\] frame|abort|debug break|Assert|PAGEERROR|RuntimeError|Loading|Load_|Save|save|ScoreScreen|Mission/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
+  if (/\[debug\]|\[trace\]|\[audio\]|\[d3d9\] frame|abort|debug break|Assert|PAGEERROR|RuntimeError|Loading|Load_|Save|save|ScoreScreen|Mission/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
   lines.push(`${stamp()} ${t}`);
 });
 // Hang watchdog: a CPU profile runs from the campaign start; if the page logs
@@ -90,6 +90,7 @@ await page.keyboard.press('Escape');
 await page.waitForTimeout(3000);
 await call('_Rebel_Debug_Dump');
 await shot('esc-closed');
+if (step === 'esc') { writeFileSync(`${outDir}/complete-console.log`, lines.join('\n')); process.exit(0); }
 // Save, walk away, load.
 await dump();
 await call('_Rebel_Debug_Save');

@@ -206,6 +206,25 @@ function installInput() {
   });
 }
 
+/* ------------------------------------------------------------- fullscreen */
+
+// Alt+Enter toggles fullscreen. In fullscreen Chrome's Keyboard Lock hands
+// the game keys the browser would otherwise take (Ctrl+W closes the tab and
+// Ctrl is crouch; Escape leaves pointer lock). Holding Escape still exits.
+async function toggleFullscreen() {
+  if (document.fullscreenElement) { await document.exitFullscreen().catch(() => {}); return; }
+  try {
+    await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    await navigator.keyboard?.lock?.();
+  } catch (e) { log('[page] fullscreen: ' + e.message); }
+}
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Enter' && e.altKey && !e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); toggleFullscreen(); }
+}, true);
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) navigator.keyboard?.unlock?.(); });
+// Outside fullscreen, ask before leaving (Ctrl+W / Cmd+W mid-mission).
+window.addEventListener('beforeunload', (e) => { if (running && !params.has('noguard')) { e.preventDefault(); e.returnValue = ''; } });
+
 /* ------------------------------------------------------------------ audio */
 
 // Browsers start AudioContexts suspended until a user gesture.
