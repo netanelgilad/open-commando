@@ -42,7 +42,8 @@ where the shortcut lives and what "done" looks like.
 
 - **Westwood Online / GameSpy** code paths are excluded (`connect.cpp`,
   `#ifndef REBEL_PORTABLE`). Multiplayer needs a WebSocket/WebRTC transport
-  and a lobby to replace them.
+  and a lobby to replace them. Plan: `docs/ONLINE_PLAN.md` (Durable Objects
+  for lobby/matchmaking/signaling, WebRTC for game traffic, dedicated server).
 
 ## Platform
 
