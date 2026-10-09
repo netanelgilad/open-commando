@@ -62,21 +62,37 @@ where the shortcut lives and what "done" looks like.
 
 ## Performance / build
 
-- **Frame pacing**: the game paces itself to 60 fps and yields with a zero-delay
-  task; it no longer waits on requestAnimationFrame. On this Mac mini, rAF
-  ticked at about 5 Hz during missions. M13 now runs at roughly 40-47 fps,
-  limited by game CPU work (about 20 ms per frame); GPU time is about 1 ms per
-  frame. `?raf` restores rAF pacing for comparison. Next target: CPU per frame
-  (profile with tools/browser-test/mission-profile.mjs).
-- **Engine debug logging** still costs CPU: WWDEBUG output, script spam such as
-  M00_Play_Sound and "NULL Script Ptr". A release build (no WWDEBUG) removes it.
-- **Level load** takes about 90 s (I/O through the OPFS proxy, plus asset parsing).
-- **Debug build**: shipped with `-sASSERTIONS=1 -sSTACK_OVERFLOW_CHECK=2` and
-  WWDEBUG. Asserts are logged and play continues; `Commando_Assert_Handler` no
-  longer shuts down input or calls ExitThread under REBEL_PORTABLE. A release
-  build (and possibly JSPI instead of ASYNCIFY) is still to do.
-- **Pointer lock only**: mouse-look needs pointer lock (click the canvas).
+State as of 2026-10-09: M13 at 1280x800 runs at the 60 fps cap with 4-7 ms of
+game work per frame (GPU ~1 ms). The M13 level load takes ~3 s and boot to
+the main menu ~2.5 s.
+
+- **Builds:** `build/wasm-release` (-O3, no WWDEBUG or asserts, function names
+  kept for profiles) is served at `/`. `build/wasm` (debug: -O0, ASSERTIONS,
+  WWDEBUG logs) is served at `/dbg/` on the same origin, so both share the
+  imported game data. `/tmp/br.sh` builds release and `/tmp/b.sh` builds
+  debug.
+- **WebGL state cache** (`gfx/gl_state.*`): only changed state is issued
+  (4123 down to ~400 calls per frame). Re-issuing everything per draw had
+  saturated Chrome's GPU process. New GL state code must go through `gls::`.
+- **Dynamic buffers** are drawn from their CPU copy via per-draw scratch
+  uploads. Partial updates of in-use buffers made ANGLE copy whole buffers.
+- **Pacing:** the game follows requestAnimationFrame when it ticks at display
+  rate; otherwise it spins zero-delay message hops to 60 fps. On throttled
+  machines timers fire 50 ms late. `?raf` / `?noraf` force a mode.
+- **File I/O:**
+  - Read-only opens use OPFS sync access handles (WasmFS blob reads were async
+    round trips), and their descriptors are pooled.
+  - Lookups of absent files are answered from the directory cache.
+  - Registry writes are batched to once per frame.
+- **Not done:** JSPI instead of ASYNCIFY (smaller and faster wasm), not
+  needed at current frame times.
+- **Pointer lock only:** mouse-look needs pointer lock (click the canvas).
   Without it, for example with `?nolock`, the mouse only drives the menu cursor.
+- **Profiling tools** (tools/browser-test):
+  - `load-profile.mjs` prints the [load] phase timeline; BOOT=1 profiles boot.
+  - `worker-profile.mjs` profiles the pthreads.
+  - `timers.mjs` counts GL calls and probes timer latency.
+  - `analyze.mjs`, `callers.mjs` and `window.mjs` read the profiles.
 
 ## Verified
 
