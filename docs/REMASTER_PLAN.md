@@ -149,10 +149,36 @@ renderer draws the new asset; physics, AI and hit detection use the original.
 5. **Own content:** the same pipeline makes the original-free asset set
    needed for public hosting and for the RA2 mod.
 
-## Open questions
+## Decisions to make
 
-- Art direction: faithful "HD original" (same designs, more detail) or
-  reimagined designs? Faithful is cheaper and safer for "plays the same".
-- Who makes the art: in-house, contractors, community, or AI-assisted?
-  It decides the timeline far more than the code does.
-- Target audience hardware, which decides the default preset.
+None of these blocks phase 1 (renderer groundwork with the original assets);
+all of them shape phases 2-5.
+
+| # | Decision | Options | Notes / recommendation |
+|---|---|---|---|
+| 1 | Art direction | (a) faithful "HD original": same designs, more detail; (b) reimagined designs; (c) faithful first, reimagined later | (a) is cheaper, keeps silhouettes close to the collision meshes (the "plays the same" rule) and is what fans of a remaster expect |
+| 2 | Who makes the art | in-house, contractors, community/modders, AI-assisted (textures, concepts, upscales) with an artist pass | Decides the timeline far more than the code. AI helps most with textures and concepts; models, rigs and animations still need artists |
+| 3 | Target audience hardware | laptops (built-in GPUs), gaming PCs, both | Decides the default preset. Recommendation: design down to Remastered Low on ~2020 built-in graphics |
+| 4 | Remaster level | 1: renderer only; 2: renderer + new assets; 3: remake | Recommendation: 1, then 2. Level 3 only for new content (e.g. RA2-themed maps) |
+| 5 | Renderer technology | WebGPU (with WebGL2 kept for Classic); WebGL2-only remaster | WebGPU: lower per-call overhead, compute for culling and post-processing. Keep Classic on WebGL2 for old devices and phones |
+| 6 | Modes in the product | Classic/Remastered toggle; Remastered only | Keep the toggle: the faithful look is a feature, and it's the fallback |
+| 7 | Lighting approach | Offline-baked GI/lightmaps per map + real-time sun/local shadows; fully real-time | No browser ray tracing exists, so baked GI plus real-time shadows |
+| 8 | Texture resolution and download size | 1k / 2k / 4k; one package vs. base + optional "HD texture pack"; stream per map | Estimate 5-15 GB for a full 2k remaster vs. 1.3 GB original. Recommendation: Basis-compressed 2k base, optional 4k pack, per-map streaming |
+| 9 | Order of content | campaign first; multiplayer maps first; one map per mode | If online multiplayer comes first, start with the MP maps (fewer, reused a lot) |
+| 10 | Vertical slice content | C&C_Field (MP) or M01 (campaign); Havoc + one enemy + one vehicle + two weapons | Recommendation: C&C_Field (all core assets: infantry, vehicles, buildings, terrain) |
+| 11 | Hitbox / collision policy | Keep the original collision exactly; allow small adjustments | Keep exact. Any change is a gameplay change and needs re-testing |
+| 12 | Animations | Keep the originals (on new models); new animations with identical timing and event bones | Start with the originals; replace later where they look dated |
+| 13 | Level editing | Run the original LevelEdit on Windows; port LevelEdit; build our own glTF-based map pipeline | Needed for new maps and re-baking. Decide when phase 3 starts |
+| 14 | Relation to our own assets | Remaster assets = the original-free asset set for public hosting and the RA2 mod; keep them separate | If designs stay faithful to EA's, they are still derivative of EA's art (see OPEN_SOURCE_PLAN.md) |
+
+## Effort and risk notes
+
+- Code (phases 1-2): a renderer and a pipeline, weeks to a few months of
+  focused work. Benchmarked against the presets above.
+- Art (phases 3-4): hundreds of models (infantry classes, vehicles,
+  buildings, weapons, props) and ~24 maps. This is the bulk of a remaster.
+- Biggest gameplay risk: visual geometry that no longer matches collision.
+  It is caught by automated checks (silhouette/bounds comparisons per asset)
+  and scripted playthroughs (the existing browser tests).
+- Biggest platform risk: download size and browser storage quota, handled by
+  streaming and compression.
