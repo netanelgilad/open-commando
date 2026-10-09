@@ -4,11 +4,11 @@
 # their own install in the browser.
 #
 #   tools/deploy-web.sh            # build dist/
-#   tools/deploy-web.sh --publish  # also upload to Cloudflare Pages
-#                                  # (wrangler, project $PAGES_PROJECT,
-#                                  # default open-commando)
+#   tools/deploy-web.sh --publish  # also deploy to Cloudflare Workers
+#                                  # (static assets, wrangler.jsonc;
+#                                  # needs CLOUDFLARE_API_TOKEN)
 #
-# Cloudflare Pages reads dist/_headers: the engine needs cross-origin
+# Workers static assets read dist/_headers: the engine needs cross-origin
 # isolation (COOP/COEP) for SharedArrayBuffer and threads.
 set -eu
 cd "$(dirname "$0")/.."
@@ -53,5 +53,5 @@ cat > dist/_headers <<'H'
 H
 echo "dist/ ready ($(du -sh dist | cut -f1)), build $commit$dirty"
 if [ "${1:-}" = "--publish" ]; then
-  npx --yes wrangler pages deploy dist --project-name "${PAGES_PROJECT:-open-commando}" --branch main --commit-hash "$commit"
+  wrangler deploy --config wrangler.jsonc
 fi

@@ -1,0 +1,12 @@
+// Cloudflare Workers static-assets site for the public build (no Worker
+// script: dist/ is served as-is; dist/_headers adds the cross-origin
+// isolation headers). Build dist/ with tools/deploy-web.sh first.
+{
+  "name": "open-commando",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "none"
+  },
+  "workers_dev": true
+}
