@@ -20,6 +20,10 @@
 #include <mutex>
 #include "saveloadstatus.h"
 
+#include <chrono>
+#include <cstdio>
+#include <string>
+
 #define MAX_STATUS_TEXT_ID 2
 
 static std::recursive_mutex text_mutex;
@@ -27,6 +31,19 @@ static StringClass status_text[MAX_STATUS_TEXT_ID];
 
 void SaveLoadStatus::Set_Status_Text(const char *text, int id) {
   std::lock_guard lock(text_mutex);
+#ifdef REBEL_PORTABLE
+  // Load phase timeline for the browser build: how long the previous phase took.
+  if (id == 0 && text) {
+    static auto last = std::chrono::steady_clock::now();
+    static std::string last_text;
+    auto now = std::chrono::steady_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(now - last).count();
+    if (!last_text.empty())
+      fprintf(stderr, "[load] %7.0f ms  %s\n", ms, last_text.c_str());
+    last = now;
+    last_text = text;
+  }
+#endif
   WWASSERT(id < MAX_STATUS_TEXT_ID);
   status_text[id] = text;
   if (id == 0)

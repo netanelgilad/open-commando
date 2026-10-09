@@ -44,13 +44,16 @@ int __real_truncate(const char *, off_t);
 }
 
 static bool Needs_Work(const char *path) {
-  // Fast path: nothing Windows-ish and the exact path exists.
   if (!path || !*path)
     return false;
   if (strchr(path, '\\') || (path[0] && path[1] == ':'))
     return true;
-  struct stat st;
-  return __real_stat(path, &st) != 0;
+  // Absolute paths outside the persistent mount (/rebel, /dev, /tmp...) are
+  // in-memory and already exact. Everything else goes through the cached
+  // listings, which costs no OPFS round trip once a directory is known.
+  if (path[0] == '/' && strncmp(path, "/opfs", 5) != 0)
+    return false;
+  return true;
 }
 
 // Directory listings are cached (each listing is a round trip to OPFS) and
@@ -68,7 +71,8 @@ static void Invalidate_Dir_Cache() {
   Dir_Cache().clear();
 }
 
-static bool Match_Component(const std::string &dir, const std::string &name, std::string &out) {
+// `listed` is set when the directory could be listed (so a miss is real).
+static bool Match_Component(const std::string &dir, const std::string &name, std::string &out, bool *listed) {
   std::string key = dir.empty() ? "." : dir;
   std::vector<std::string> names;
   {
@@ -77,7 +81,12 @@ static bool Match_Component(const std::string &dir, const std::string &name, std
     if (it != Dir_Cache().end())
       names = it->second;
   }
-  if (names.empty()) {
+  bool have = !names.empty();
+  if (!have) {
+    std::lock_guard<std::mutex> g(Cache_Lock());
+    have = Dir_Cache().count(key) != 0; // an empty directory listed before
+  }
+  if (!have) {
     DIR *d = __real_opendir(key.c_str());
     if (!d)
       return false;
@@ -87,6 +96,8 @@ static bool Match_Component(const std::string &dir, const std::string &name, std
     std::lock_guard<std::mutex> g(Cache_Lock());
     Dir_Cache()[key] = names;
   }
+  if (listed)
+    *listed = true;
   for (const std::string &n : names)
     if (strcasecmp(n.c_str(), name.c_str()) == 0) {
       out = n;
@@ -95,7 +106,11 @@ static bool Match_Component(const std::string &dir, const std::string &name, std
   return false;
 }
 
-std::string Rebel_Resolve_Path(const char *path) {
+std::string Rebel_Resolve_Path(const char *path) { return Rebel_Resolve_Path(path, nullptr); }
+
+std::string Rebel_Resolve_Path(const char *path, bool *known_missing) {
+  if (known_missing)
+    *known_missing = false;
   if (!path)
     return std::string();
   if (!Needs_Work(path))
@@ -125,8 +140,12 @@ std::string Rebel_Resolve_Path(const char *path) {
       base.pop_back();
     std::string actual = comp;
     if (comp != ".." && !missing) {
-      if (!Match_Component(base.empty() && absolute ? "/" : base, comp, actual))
+      bool listed = false;
+      if (!Match_Component(base.empty() && absolute ? "/" : base, comp, actual, &listed)) {
         missing = true; // keep caller's spelling for the rest
+        if (known_missing && listed)
+          *known_missing = true;
+      }
     }
     if (!result.empty() && result.back() != '/')
       result += '/';
@@ -140,7 +159,16 @@ std::string Rebel_Resolve_Path(const char *path) {
 extern "C" {
 
 FILE *__wrap_fopen(const char *path, const char *mode) {
-  FILE *f = __real_fopen(Rebel_Resolve_Path(path).c_str(), mode);
+  bool missing = false;
+  std::string p = Rebel_Resolve_Path(path, &missing);
+  bool writes = mode && (strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+'));
+  if (missing && !(mode && (strchr(mode, 'w') || strchr(mode, 'a')))) {
+    errno = ENOENT;
+    return nullptr;
+  }
+  if (writes)
+    Rebel_File_Pool_Forget(p);
+  FILE *f = __real_fopen(p.c_str(), mode);
   if (mode && (strchr(mode, 'w') || strchr(mode, 'a')))
     Invalidate_Dir_Cache();
   return f;
@@ -156,14 +184,39 @@ int __wrap_open(const char *path, int flags, ...) {
     mode = va_arg(ap, int);
     va_end(ap);
   }
-  int fd = __real_open(Rebel_Resolve_Path(path).c_str(), flags, mode);
+  bool missing = false;
+  std::string p = Rebel_Resolve_Path(path, &missing);
+  if (missing && !(flags & O_CREAT)) {
+    errno = ENOENT;
+    return -1;
+  }
+  if ((flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC))
+    Rebel_File_Pool_Forget(p);
+  int fd = __real_open(p.c_str(), flags, mode);
   if (flags & O_CREAT)
     Invalidate_Dir_Cache();
   return fd;
 }
-int __wrap_stat(const char *path, struct stat *st) { return __real_stat(Rebel_Resolve_Path(path).c_str(), st); }
-int __wrap_lstat(const char *path, struct stat *st) { return __real_lstat(Rebel_Resolve_Path(path).c_str(), st); }
-int __wrap_access(const char *path, int mode) { return __real_access(Rebel_Resolve_Path(path).c_str(), mode); }
+// Lookups of paths known to be absent fail here, without an OPFS round trip.
+#define REBEL_RESOLVE_OR_ENOENT(path, var)                                                                             \
+  bool var##_missing = false;                                                                                          \
+  std::string var = Rebel_Resolve_Path(path, &var##_missing);                                                          \
+  if (var##_missing) {                                                                                                 \
+    errno = ENOENT;                                                                                                    \
+    return -1;                                                                                                         \
+  }
+int __wrap_stat(const char *path, struct stat *st) {
+  REBEL_RESOLVE_OR_ENOENT(path, p);
+  return __real_stat(p.c_str(), st);
+}
+int __wrap_lstat(const char *path, struct stat *st) {
+  REBEL_RESOLVE_OR_ENOENT(path, p);
+  return __real_lstat(p.c_str(), st);
+}
+int __wrap_access(const char *path, int mode) {
+  REBEL_RESOLVE_OR_ENOENT(path, p);
+  return __real_access(p.c_str(), mode);
+}
 DIR *__wrap_opendir(const char *path) { return __real_opendir(Rebel_Resolve_Path(path).c_str()); }
 int __wrap_mkdir(const char *path, mode_t mode) { int r = __real_mkdir(Rebel_Resolve_Path(path).c_str(), mode);
   Invalidate_Dir_Cache();
@@ -173,20 +226,33 @@ int __wrap_rmdir(const char *path) { int r = __real_rmdir(Rebel_Resolve_Path(pat
   Invalidate_Dir_Cache();
   return r;
 }
-int __wrap_unlink(const char *path) { int r = __real_unlink(Rebel_Resolve_Path(path).c_str());
+int __wrap_unlink(const char *path) {
+  std::string p = Rebel_Resolve_Path(path);
+  Rebel_File_Pool_Forget(p);
+  int r = __real_unlink(p.c_str());
   Invalidate_Dir_Cache();
   return r;
 }
-int __wrap_remove(const char *path) { int r = __real_remove(Rebel_Resolve_Path(path).c_str());
+int __wrap_remove(const char *path) {
+  std::string p = Rebel_Resolve_Path(path);
+  Rebel_File_Pool_Forget(p);
+  int r = __real_remove(p.c_str());
   Invalidate_Dir_Cache();
   return r;
 }
 int __wrap_rename(const char *a, const char *b) {
-  int r = __real_rename(Rebel_Resolve_Path(a).c_str(), Rebel_Resolve_Path(b).c_str());
+  std::string pa = Rebel_Resolve_Path(a), pb = Rebel_Resolve_Path(b);
+  Rebel_File_Pool_Forget(pa);
+  Rebel_File_Pool_Forget(pb);
+  int r = __real_rename(pa.c_str(), pb.c_str());
   Invalidate_Dir_Cache();
   return r;
 }
 int __wrap_chdir(const char *path) { return __real_chdir(Rebel_Resolve_Path(path).c_str()); }
-int __wrap_truncate(const char *path, off_t len) { return __real_truncate(Rebel_Resolve_Path(path).c_str(), len); }
+int __wrap_truncate(const char *path, off_t len) {
+  std::string p = Rebel_Resolve_Path(path);
+  Rebel_File_Pool_Forget(p);
+  return __real_truncate(p.c_str(), len);
+}
 
 } // extern "C"

@@ -16,12 +16,102 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
+#include <map>
+#include <mutex>
 #include <vector>
 
 namespace {
 
+// Read-only descriptors are pooled: opening and closing an OPFS access
+// handle costs a few milliseconds each, and the engine reopens the same mix
+// files for every asset. A closed read-only handle leaves its descriptor in
+// the pool for the next open of that path; writes, deletes and renames of the
+// path (path_resolve.cpp) close it.
+struct FdPool {
+  struct Entry {
+    int fd = -1;
+    int users = 0;
+    unsigned long long last_use = 0;
+    bool stale = false; // forgotten while in use: close on last release
+  };
+  std::mutex lock;
+  std::map<std::string, Entry> entries;
+  unsigned long long clock = 0;
+  static constexpr size_t MAX_IDLE = 64;
+
+  int Acquire(const std::string &key) {
+    std::lock_guard<std::mutex> g(lock);
+    auto it = entries.find(key);
+    if (it == entries.end() || it->second.stale)
+      return -1;
+    it->second.users++;
+    it->second.last_use = ++clock;
+    return it->second.fd;
+  }
+  // Takes ownership of a freshly opened fd (already counted as one user).
+  void Add(const std::string &key, int fd) {
+    std::lock_guard<std::mutex> g(lock);
+    Entry &e = entries[key];
+    if (e.fd >= 0 && e.fd != fd) { // raced: keep the existing one as is
+      ::close(fd);
+      return;
+    }
+    e.fd = fd;
+    e.users = 1;
+    e.stale = false;
+    e.last_use = ++clock;
+    Trim();
+  }
+  void Release(const std::string &key, int fd) {
+    std::lock_guard<std::mutex> g(lock);
+    auto it = entries.find(key);
+    if (it == entries.end() || it->second.fd != fd) {
+      ::close(fd);
+      return;
+    }
+    if (--it->second.users <= 0 && it->second.stale) {
+      ::close(fd);
+      entries.erase(it);
+    }
+    Trim();
+  }
+  void Forget(const std::string &key) {
+    std::lock_guard<std::mutex> g(lock);
+    auto it = entries.find(key);
+    if (it == entries.end())
+      return;
+    if (it->second.users > 0) {
+      it->second.stale = true;
+      return;
+    }
+    ::close(it->second.fd);
+    entries.erase(it);
+  }
+  void Trim() { // caller holds the lock
+    size_t idle = 0;
+    for (auto &e : entries)
+      idle += e.second.users <= 0;
+    while (idle > MAX_IDLE) {
+      auto oldest = entries.end();
+      for (auto it = entries.begin(); it != entries.end(); ++it)
+        if (it->second.users <= 0 && (oldest == entries.end() || it->second.last_use < oldest->second.last_use))
+          oldest = it;
+      if (oldest == entries.end())
+        break;
+      ::close(oldest->second.fd);
+      entries.erase(oldest);
+      idle--;
+    }
+  }
+};
+FdPool &Pool() {
+  static FdPool *p = new FdPool(); // construct on first use (static init order)
+  return *p;
+}
+
 struct FileObject : RebelHandle {
   int fd = -1;
+  std::string pool_key; // set when fd belongs to the read-only pool
   // Read-only handles read through a window buffer: the engine issues many
   // tiny reads, and each syscall is a round trip to the OPFS worker.
   bool read_only = false;
@@ -33,8 +123,12 @@ struct FileObject : RebelHandle {
   static constexpr size_t WINDOW = 256 * 1024;
   FileObject() : RebelHandle(Kind::File) {}
   void Close() override {
-    if (fd >= 0)
-      ::close(fd);
+    if (fd >= 0) {
+      if (!pool_key.empty())
+        Pool().Release(pool_key, fd);
+      else
+        ::close(fd);
+    }
     fd = -1;
   }
   ~FileObject() override { Close(); }
@@ -105,25 +199,49 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD, LPSECURITY_ATTRI
   case TRUNCATE_EXISTING: flags |= O_TRUNC; break;
   default: break;
   }
-  int fd = ::open(name, flags, 0644);
+  int fd = -1;
+  std::string pool_key;
+  if (flags == O_RDONLY) {
+    pool_key = Rebel_Resolve_Path(name);
+    fd = Pool().Acquire(pool_key);
+  }
+  bool pooled = fd >= 0;
+#ifdef __EMSCRIPTEN__
+  // WasmFS serves read-only OPFS opens from a Blob: every read is an async
+  // slice().arrayBuffer() round trip on the OPFS thread (the level loader
+  // waited on those 60% of the time). Read-write opens get a synchronous
+  // access handle instead, so plain reads open that way too; nothing is
+  // written through it. Falls back if the file is locked (another tab).
+  if (flags == O_RDONLY && fd < 0)
+    fd = ::open(name, O_RDWR);
+#endif
+  if (fd < 0)
+    fd = ::open(name, flags, 0644);
   if (fd < 0) {
     Fail_Errno();
     return INVALID_HANDLE_VALUE;
   }
-  struct stat st;
+  if (!pool_key.empty() && !pooled)
+    Pool().Add(pool_key, fd);
+  struct stat st{};
   // Windows only opens directories as files with FILE_FLAG_BACKUP_SEMANTICS,
   // which the engine never uses ("Data\\" + empty name must fail).
   if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
-    ::close(fd);
+    if (!pool_key.empty()) {
+      Pool().Release(pool_key, fd);
+      Pool().Forget(pool_key);
+    } else {
+      ::close(fd);
+    }
     SetLastError(ERROR_ACCESS_DENIED);
     return INVALID_HANDLE_VALUE;
   }
   FileObject *f = new FileObject();
   f->fd = fd;
+  f->pool_key = pool_key;
   if ((flags & O_ACCMODE) == O_RDONLY) {
     f->read_only = true;
-    struct stat fst;
-    f->size = fstat(fd, &fst) == 0 ? (long long)fst.st_size : 0;
+    f->size = (long long)st.st_size; // from the fstat above
   }
   SetLastError(ERROR_SUCCESS);
   return f;
@@ -255,6 +373,11 @@ extern "C" BOOL SetEndOfFile(HANDLE h) {
 
 extern "C" DWORD GetFileSize(HANDLE h, LPDWORD high) {
   FileObject *f = As_File(h);
+  if (f && f->read_only) { // size known at open; fstat is an OPFS round trip
+    if (high)
+      *high = (DWORD)((unsigned long long)f->size >> 32);
+    return (DWORD)f->size;
+  }
   struct stat st;
   if (!f || fstat(f->fd, &st) != 0) {
     SetLastError(ERROR_INVALID_HANDLE);
@@ -520,3 +643,5 @@ extern "C" BOOL GetVolumeInformationA(LPCSTR, LPSTR name, DWORD namelen, LPDWORD
     snprintf(fsname, fsnamelen, "WEBFS");
   return TRUE;
 }
+
+void Rebel_File_Pool_Forget(const std::string &resolved_path) { Pool().Forget(resolved_path); }
