@@ -79,14 +79,22 @@ where the shortcut lives and what "done" looks like.
 
 ## Verified
 
-`tools/browser-test/complete.mjs` checks, in M13:
-- Escape opens the EVA menu.
-- Save writes save\webtest.sav and its description and map read back.
-- Walking away and then loading puts the player back where they saved.
-- Winning shows the score screen, and Continue loads M01.
-- Samples and music streams are playing.
-
-`menus.mjs` opens every Options sub-menu, and `eva.mjs` opens every EVA tab.
+Browser tests are in `tools/browser-test/`, headless Chromium at 1280x800:
+- `complete.mjs` checks the M13 flow:
+  - Escape opens the EVA menu, and a second Escape returns to the game.
+  - Saving, walking away and loading puts the player back where they saved.
+  - Winning shows the score screen, and Continue loads M01.
+  - Samples and music are playing, and the output level is nonzero.
+- `campaign.mjs` wins every mission in turn: M13 and M01-M11 all load, are
+  playable and reach the score screen (about 30 min).
+- `practice.mjs` starts Multiplayer Practice (C&C mode against bots): it is
+  playable, credits tick up and firing works.
+- `menus.mjs` covers the menus:
+  - Every Options sub-menu and every Configuration tab open.
+  - Rebinding a key in Controls works.
+  - Escape backs out to the right parent.
+- `eva.mjs` opens every EVA tab.
+- Settings persist in OPFS (`/opfs/persist/registry.txt`).
 
 ## Open bugs
 

@@ -5,7 +5,9 @@
 
 #include <cstdio>
 
-extern "C" void Rebel_Debug_Dump(void) {
+static bool PendingDump = false;
+extern "C" void Rebel_Debug_Dump(void) { PendingDump = true; } // queued, see Rebel_Run_Pending_Actions
+static void Dump_Modes(void) {
   static const char *names[] = {"Combat", "Console", "LAN", "Menu", "Movie", "Overlay", "ScoreScreen", "TextDisplay", "WOL"};
   fprintf(stderr, "[debug] game modes:");
   for (const char *n : names) {
@@ -48,6 +50,8 @@ static void Bring_Target(void);
 static float PendingDamage = 0;
 extern "C" void Rebel_Debug_Damage_Target(float amount) { PendingDamage = amount; }
 static void Damage_Target(float amount);
+static void Dump_Input(void);
+static bool PendingInputDump = false;
 // Test hooks: save to / load from save\\webtest.sav (what the Save and Load
 // menus do), and end the mission as won (what a mission script does).
 static int PendingSave = 0, PendingLoad = 0, PendingWin = 0;
@@ -111,6 +115,14 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
       dlg->On_Command(id, 0, 0);
     }
   }
+  if (PendingDump) {
+    PendingDump = false;
+    Dump_Modes();
+  }
+  if (PendingInputDump) {
+    PendingInputDump = false;
+    Dump_Input();
+  }
   if (PendingWin) {
     PendingWin = 0;
     fprintf(stderr, "[debug] mission complete (success)\n");
@@ -128,7 +140,10 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
 extern bool GameInFocus;
 extern int FunctionKeyStates[];
 
-extern "C" void Rebel_Debug_Input(void) {
+// Queued like the other hooks: reading game state straight from a page call
+// can catch a level half torn down (it crashed once during a load).
+extern "C" void Rebel_Debug_Input(void) { PendingInputDump = true; }
+static void Dump_Input(void) {
   fprintf(stderr, "[debug] input: menu=%d console=%d captured=%d W=%d mouseL=%d axisX=%ld fwd=%.2f turnL=%.2f fn_fwd_key=%d\n",
           (int)Input::MenuMode, (int)Input::ConsoleMode, (int)DirectInput::Captured,
           DirectInput::Get_Keyboard_Button(0x11), DirectInput::Get_Mouse_Button(0),
