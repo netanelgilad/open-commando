@@ -106,6 +106,7 @@ void UnitCoordinationZoneMgr::Detect_Ladder_Zones(void) {
     //
     AABoxClass new_zone;
     new_zone.Center.Set(transition->Get_Ending_TM().Get_Translation());
+    new_zone.Extent.Set(0, 0, 0); // was left uninitialized (garbage zones in optimized builds froze vehicles)
     new_zone.Add_Box(zone_box_as_aabox);
 
     //

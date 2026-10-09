@@ -253,7 +253,14 @@ for (const name of ['AudioContext', 'webkitAudioContext']) {
   window[name] = function (...a) { const c = new Orig(...a); audioContexts.push(c); return c; };
   window[name].prototype = Orig.prototype;
 }
-const resumeAudio = () => audioContexts.forEach((c) => c.state !== 'running' && c.resume());
+// Closed contexts (finished cutscenes) are dropped instead of resumed.
+const resumeAudio = () => {
+  for (let i = audioContexts.length - 1; i >= 0; i--) {
+    const c = audioContexts[i];
+    if (c.state === 'closed') audioContexts.splice(i, 1);
+    else if (c.state !== 'running') c.resume().catch(() => {});
+  }
+};
 ['pointerdown', 'keydown'].forEach((t) => window.addEventListener(t, resumeAudio, true));
 
 /* ----------------------------------------------------------------- movies */

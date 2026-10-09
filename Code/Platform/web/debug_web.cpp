@@ -63,6 +63,12 @@ extern "C" void Rebel_Debug_Win_Mission(void) { PendingWin = 1; }
 static int PendingEva = -1;
 // Test hook for the hang watchdog: busy-waits the main thread (seconds).
 static int PendingStall = 0;
+// Test hooks for vehicles: spawn a player tank in front of the player, then
+// put the player in it (as walking up and pressing the action key does).
+static int PendingVehicle = 0; // 1 spawn, 2 enter
+extern "C" void Rebel_Debug_Spawn_Vehicle(void) { PendingVehicle = 1; }
+extern "C" void Rebel_Debug_Enter_Vehicle(void) { PendingVehicle = 2; }
+static void Vehicle_Action(int action);
 extern "C" void Rebel_Debug_Stall(int seconds) { PendingStall = seconds; }
 // Test hooks for walking the menus: list the active dialog's controls, and
 // press a control (as a click on it would, through On_Command).
@@ -108,6 +114,11 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
     fprintf(stderr, "[debug] opening EVA tab %d\n", tab);
     EVAEncyclopediaMenuClass::Display((EVAEncyclopediaMenuClass::TAB_ID)tab);
   }
+  if (PendingVehicle) {
+    int action = PendingVehicle;
+    PendingVehicle = 0;
+    Vehicle_Action(action);
+  }
   if (PendingStall > 0) {
     int secs = PendingStall;
     PendingStall = 0;
@@ -150,6 +161,7 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
 #undef private
 #include "combat.h"
 #include "soldier.h"
+#include "vehicle.h"
 #include "ccamera.h"
 extern bool GameInFocus;
 extern int FunctionKeyStates[];
@@ -167,6 +179,13 @@ static void Dump_Input(void) {
           COMBAT_CAMERA ? (int)COMBAT_CAMERA->Is_In_Cinematic() : -1, FunctionKeyStates[INPUT_FUNCTION_MOVE_FORWARD], (int)DirectInput::Get_Button_Value(0x43),
           (int)DirectInput::Get_Button_Value(0x11), (int)GameInFocus, CombatManager::Get_Sync_Time());
   if (SoldierGameObj *star = COMBAT_STAR) {
+    if (VehicleGameObj *v = star->Get_Vehicle()) {
+      Vector3 vp, vel;
+      v->Get_Position(&vp);
+      v->Get_Velocity(vel);
+      fprintf(stderr, "[debug] vehicle at %.2f %.2f %.2f speed %.2f, driver=%d\n", vp.X, vp.Y, vp.Z, vel.Length(),
+              v->Get_Driver() == star);
+    }
     Vector3 p;
     star->Get_Position(&p);
     fprintf(stderr, "[debug] star at %.2f %.2f %.2f facing %.2f, controlled=%d\n", p.X, p.Y, p.Z, star->Get_Facing(),
@@ -273,5 +292,47 @@ static void List_Controls(void) {
     WideStringClass(c->Get_Text()).Convert_To(text);
     fprintf(stderr, "[debug]   ctl %d %s at %.0f,%.0f-%.0f,%.0f %s%s'%s'\n", c->Get_ID(), typeid(*c).name(), r.Left, r.Top,
             r.Right, r.Bottom, c->Is_Enabled() ? "" : "disabled ", c->Is_Visible() ? "" : "hidden ", text.Peek_Buffer());
+  }
+}
+
+#include "vehicle.h"
+#include "objlibrary.h"
+#include "pscene.h"
+#include "obbox.h"
+#include "aabox.h"
+
+static int SpawnedVehicleId = 0;
+
+static void Vehicle_Action(int action) {
+  SoldierGameObj *star = COMBAT_STAR;
+  if (!star)
+    return;
+  if (action == 1) {
+    Vector3 me;
+    star->Get_Position(&me);
+    float f = star->Get_Facing();
+    Matrix3D tm(true);
+    tm.Set_Translation(me + Vector3(cosf(f) * 8.0f, sinf(f) * 8.0f, 4.0f)); // dropped from 4 m: starts clear of the ground
+    tm.Rotate_Z(f);
+    BaseGameObj *base = ObjectLibraryManager::Create_Object("GDI_Medium_Tank_Player");
+    VehicleGameObj *v = base && base->As_PhysicalGameObj() ? base->As_PhysicalGameObj()->As_VehicleGameObj() : nullptr;
+    if (!v) {
+      fprintf(stderr, "[debug] could not create GDI_Medium_Tank_Player\n");
+      return;
+    }
+    v->Set_Transform(tm);
+    v->Start_Observers();
+    SpawnedVehicleId = v->Get_ID();
+
+    fprintf(stderr, "[debug] spawned vehicle %d\n", SpawnedVehicleId);
+  } else {
+    SmartGameObj *o = GameObjManager::Find_SmartGameObj(SpawnedVehicleId);
+    VehicleGameObj *v = o ? o->As_VehicleGameObj() : nullptr;
+    if (!v) {
+      fprintf(stderr, "[debug] no vehicle to enter\n");
+      return;
+    }
+    v->Add_Occupant(star);
+    fprintf(stderr, "[debug] entered vehicle %d (driver %p)\n", SpawnedVehicleId, (void *)v->Get_Driver());
   }
 }
