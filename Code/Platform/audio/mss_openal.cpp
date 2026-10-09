@@ -618,6 +618,25 @@ extern "C" void Rebel_Audio_Update(void) {
     Stream_Service(st);
 }
 
+// Debug: how many samples and streams are audible right now.
+extern "C" void Rebel_Audio_Stats(void) {
+  LOCK;
+  int playing = 0, streams = 0;
+  for (Sample *s : Samples) {
+    ALint state = 0;
+    if (s->source)
+      alGetSourcei(s->source, AL_SOURCE_STATE, &state);
+    playing += state == AL_PLAYING;
+  }
+  for (Stream *st : Streams) {
+    ALint state = 0;
+    alGetSourcei(st->source, AL_SOURCE_STATE, &state);
+    streams += state == AL_PLAYING;
+  }
+  fprintf(stderr, "[audio] context=%d samples=%d playing=%d streams=%d playing=%d\n", Context != nullptr,
+          (int)Samples.size(), playing, (int)Streams.size(), streams);
+}
+
 extern "C" S32 AIL_startup(void) { return 1; }
 
 extern "C" void AIL_shutdown(void) {

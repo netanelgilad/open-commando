@@ -21,9 +21,10 @@ where the shortcut lives and what "done" looks like.
   (`Code/Platform/gfx/gdi_text.cpp`); bold is emulated by 1px widening,
   italic requests render upright. The shipped fonts (Arial MT, Regatta
   Condensed LET) have no italic files.
-- **Gamma ramp** (`SetDeviceGammaRamp` / `IDirect3DDevice9::SetGammaRamp`)
-  must be applied in the present pass; until then the brightness slider
-  does nothing.
+- **Gamma ramp** is applied as an SVG `feComponentTransfer` filter on the
+  canvas (`Rebel_JS_Set_Gamma` in `d3d9_device.cpp`). Check that Chrome keeps
+  it on the GPU; if a non-default brightness costs frames, move it into a
+  final present pass.
 - **Frame grabber** (AVI movie capture, developer tool) is inert.
 
 ## Text encoding
@@ -48,7 +49,12 @@ where the shortcut lives and what "done" looks like.
 - **Blocking waits on the browser main thread** return immediately
   (`Sleep`, `WaitForSingleObject`); revisit once the main-loop model
   (ASYNCIFY/JSPI vs. worker) is settled.
-- **Cutscenes (Bink)**: not yet handled; plan is offline transcode to WebM.
+- **Cutscenes (Bink)** are transcoded offline to WebM (`tools/transcode-movies.sh`)
+  and played in a `<video>` overlay. Esc, Space or Enter skips. Bink subtitles
+  aren't shown.
+- **Pointer lock and Escape**: Chrome uses Escape to leave pointer lock and
+  doesn't pass it to the page, so the page sends the game an Escape when the
+  lock is lost (`web/rebel.js`). Losing focus also opens the pause menu.
 
 ## Performance / build
 

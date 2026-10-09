@@ -120,8 +120,15 @@ function canvasPoint(e) {
 let mouseX = 0, mouseY = 0;
 const lparamXY = (x, y) => ((y & 0xFFFF) << 16) | (x & 0xFFFF);
 
+let lastEscape = -1e9, sentEscape = -1e9;
 function onKey(e, down) {
   if (!running) return;
+  if (e.code === 'Escape') {
+    // A real Escape right after one we synthesized for a pointer-lock exit
+    // is the same press arriving late: drop it.
+    if (performance.now() - sentEscape < 300) { e.preventDefault(); return; }
+    if (down) lastEscape = performance.now();
+  }
   const k = KEYS[e.code];
   if (!k) return;
   // Let the browser keep a few shortcuts when not in pointer lock.
@@ -181,7 +188,22 @@ function installInput() {
   const release = () => { if (running) Module._Rebel_Input_Release_All(); };
   window.addEventListener('blur', () => { release(); post(WM.ACTIVATEAPP, 0, 0); });
   window.addEventListener('focus', () => post(WM.ACTIVATEAPP, 1, 0));
-  document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) release(); });
+  // Chrome uses Escape to leave pointer lock and doesn't pass that key press
+  // to the page, so the game would never open its pause menu. When the lock
+  // goes away without an Escape we saw, send one to the game ourselves.
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement) return;
+    release();
+    setTimeout(() => {
+      if (!running || performance.now() - lastEscape < 300) return;
+      sentEscape = performance.now();
+      const lp = 1 | (0x01 << 16);
+      Module._Rebel_Input_Key(0x01, 1);
+      post(WM.KEYDOWN, 0x1B, lp);
+      post(WM.CHAR, 0x1B, lp);
+      setTimeout(() => { Module._Rebel_Input_Key(0x01, 0); post(WM.KEYUP, 0x1B, lp | (3 << 30)); }, 50);
+    }, 150);
+  });
 }
 
 /* ------------------------------------------------------------------ audio */

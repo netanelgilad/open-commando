@@ -1,0 +1,209 @@
+// Debug hooks callable from the page (Module._Rebel_Debug_Dump()).
+#include "gamemode.h"
+#include "dialogmgr.h"
+#include "dialogbase.h"
+
+#include <cstdio>
+
+extern "C" void Rebel_Debug_Dump(void) {
+  static const char *names[] = {"Combat", "Console", "LAN", "Menu", "Movie", "Overlay", "ScoreScreen", "TextDisplay", "WOL"};
+  fprintf(stderr, "[debug] game modes:");
+  for (const char *n : names) {
+    GameModeClass *m = GameModeManager::Find(n);
+    fprintf(stderr, " %s=%s", n, !m ? "missing" : m->Is_Active() ? "ACTIVE" : "off");
+  }
+  fprintf(stderr, "\n");
+  DialogBaseClass *dlg = DialogMgrClass::Get_Active_Dialog();
+  fprintf(stderr, "[debug] active dialog %p (id %d)\n", (void *)dlg, dlg ? dlg->Get_Dlg_ID() : -1);
+}
+
+#define private public
+#include "directinput.h"
+#undef private
+#include "vector2.h"
+
+// Absolute cursor for the page's non-pointer-locked mode (menus): the engine
+// otherwise integrates DirectInput deltas (x2) and would drift from the
+// real pointer position.
+extern "C" void Rebel_Input_Set_Cursor(int x, int y) { DirectInput::Reset_Cursor_Pos(Vector2((float)x, (float)y)); }
+
+#include "campaign.h"
+#include "gameinitmgr.h"
+
+// Test hook: what the Difficulty menu's buttons do (0 = Recruit ... 2 = Commando).
+// Exports called from JavaScript run while the game's main loop is paused
+// (ASYNCIFY); running game code that can itself pause from there would nest
+// pauses. So the hook only records the request and the frame loop runs it
+// (Rebel_Run_Pending_Actions, called after each frame yield).
+static int PendingCampaign = -1;
+static bool PendingBringTarget = false;
+
+extern "C" void Rebel_Debug_Start_Campaign(int difficulty) { PendingCampaign = difficulty; }
+
+// Test hook: moves the nearest other soldier 6 m in front of the player, so a
+// test can shoot at a character.
+extern "C" void Rebel_Debug_Bring_Target(void) { PendingBringTarget = true; }
+static void Bring_Target(void);
+// Test hook: damages the soldier last brought, as a hit from the player would.
+static float PendingDamage = 0;
+extern "C" void Rebel_Debug_Damage_Target(float amount) { PendingDamage = amount; }
+static void Damage_Target(float amount);
+// Test hooks: save to / load from save\\webtest.sav (what the Save and Load
+// menus do), and end the mission as won (what a mission script does).
+static int PendingSave = 0, PendingLoad = 0, PendingWin = 0;
+extern "C" void Rebel_Debug_Save(void) { PendingSave = 1; }
+extern "C" void Rebel_Debug_Load(void) { PendingLoad = 1; }
+extern "C" void Rebel_Debug_Win_Mission(void) { PendingWin = 1; }
+static int PendingEva = -1;
+extern "C" void Rebel_Debug_Open_Eva(int tab) { PendingEva = tab; }
+#include "combat.h"
+#include "dlgevaencyclopedia.h"
+static void Save_Test_Game(void);
+static void Load_Test_Game(void);
+
+extern "C" void Rebel_Run_Pending_Actions(void) {
+  if (PendingCampaign >= 0) {
+    int difficulty = PendingCampaign;
+    PendingCampaign = -1;
+    fprintf(stderr, "[debug] starting campaign, difficulty %d\n", difficulty);
+    GameInitMgrClass::Initialize_SP(); // as DifficultyMenuClass::On_Command does
+    CampaignManager::Start_Campaign(difficulty);
+  }
+  if (PendingBringTarget) {
+    PendingBringTarget = false;
+    Bring_Target();
+  }
+  if (PendingDamage > 0) {
+    float amount = PendingDamage;
+    PendingDamage = 0;
+    Damage_Target(amount);
+  }
+  if (PendingSave) {
+    PendingSave = 0;
+    Save_Test_Game();
+  }
+  if (PendingLoad) {
+    PendingLoad = 0;
+    Load_Test_Game();
+  }
+  if (PendingEva >= 0) {
+    int tab = PendingEva;
+    PendingEva = -1;
+    fprintf(stderr, "[debug] opening EVA tab %d\n", tab);
+    EVAEncyclopediaMenuClass::Display((EVAEncyclopediaMenuClass::TAB_ID)tab);
+  }
+  if (PendingWin) {
+    PendingWin = 0;
+    fprintf(stderr, "[debug] mission complete (success)\n");
+    CombatManager::Mission_Complete(true);
+  }
+}
+
+// Input pipeline state, for diagnosing "keys do nothing in game".
+#define private public
+#include "input.h"
+#undef private
+#include "combat.h"
+#include "soldier.h"
+#include "ccamera.h"
+extern bool GameInFocus;
+extern int FunctionKeyStates[];
+
+extern "C" void Rebel_Debug_Input(void) {
+  fprintf(stderr, "[debug] input: menu=%d console=%d captured=%d W=%d mouseL=%d axisX=%ld fwd=%.2f turnL=%.2f fn_fwd_key=%d\n",
+          (int)Input::MenuMode, (int)Input::ConsoleMode, (int)DirectInput::Captured,
+          DirectInput::Get_Keyboard_Button(0x11), DirectInput::Get_Mouse_Button(0),
+          DirectInput::Get_Mouse_Axis(DirectInput::MOUSE_X_AXIS), Input::FunctionValue[INPUT_FUNCTION_MOVE_FORWARD],
+          Input::FunctionValue[INPUT_FUNCTION_TURN_LEFT], (int)Input::FunctionPrimaryKeys[INPUT_FUNCTION_MOVE_FORWARD]);
+  fprintf(stderr, "[debug] input: cinematic=%d keystate=%x f9=%x btnval=%x focus=%d sync=%u\n",
+          COMBAT_CAMERA ? (int)COMBAT_CAMERA->Is_In_Cinematic() : -1, FunctionKeyStates[INPUT_FUNCTION_MOVE_FORWARD], (int)DirectInput::Get_Button_Value(0x43),
+          (int)DirectInput::Get_Button_Value(0x11), (int)GameInFocus, CombatManager::Get_Sync_Time());
+  if (SoldierGameObj *star = COMBAT_STAR) {
+    Vector3 p;
+    star->Get_Position(&p);
+    fprintf(stderr, "[debug] star at %.2f %.2f %.2f facing %.2f, controlled=%d\n", p.X, p.Y, p.Z, star->Get_Facing(),
+            (int)star->Is_Human_Controlled());
+  } else
+    fprintf(stderr, "[debug] no star\n");
+}
+
+#include "gameobjmanager.h"
+#include "phys.h"
+#include <cmath>
+
+#include "damage.h"
+static int BroughtId = 0;
+
+static void Bring_Target(void) {
+  SoldierGameObj *star = COMBAT_STAR;
+  if (!star)
+    return;
+  Vector3 me;
+  star->Get_Position(&me);
+  SoldierGameObj *best = nullptr;
+  float best_d = 1e30f;
+  for (SLNode<SmartGameObj> *n = GameObjManager::Get_Smart_Game_Obj_List()->Head(); n; n = n->Next()) {
+    SoldierGameObj *s = n->Data()->As_SoldierGameObj();
+    if (!s || s == star)
+      continue;
+    Vector3 p;
+    s->Get_Position(&p);
+    float d = (p - me).Length2();
+    if (d < best_d) {
+      best_d = d;
+      best = s;
+    }
+  }
+  if (!best) {
+    fprintf(stderr, "[debug] no soldier to bring\n");
+    return;
+  }
+  float f = star->Get_Facing();
+  Vector3 to = me + Vector3(cosf(f) * 2.5f, sinf(f) * 2.5f, 0.0f);
+  BroughtId = best->Get_ID();
+  best->Peek_Physical_Object()->Set_Position(to);
+  fprintf(stderr, "[debug] brought soldier %d (%s) from %.0f m to %.1f %.1f %.1f\n", best->Get_ID(),
+          best->Get_Definition().Get_Name(), sqrtf(best_d), to.X, to.Y, to.Z);
+}
+
+static void Damage_Target(float amount) {
+  SmartGameObj *obj = GameObjManager::Find_SmartGameObj(BroughtId);
+  SoldierGameObj *s = obj ? obj->As_SoldierGameObj() : nullptr;
+  if (!s) {
+    fprintf(stderr, "[debug] no target to damage\n");
+    return;
+  }
+  fprintf(stderr, "[debug] damaging soldier %d by %.0f\n", BroughtId, amount);
+  OffenseObjectClass offense(amount, 0, COMBAT_STAR);
+  s->Apply_Damage_Extended(offense);
+  fprintf(stderr, "[debug] damage applied\n");
+}
+
+#include "savegame.h"
+#include "commandosaveload.h"
+#include "gamemode.h"
+#include "god.h"
+
+static void Save_Test_Game(void) {
+  fprintf(stderr, "[debug] saving save\\webtest.sav\n");
+  SaveGameManager::Set_Description(L"web test");
+  SaveGameManager::Save_Game("save\\webtest.sav", &_CommandoSaveLoad, NULL);
+  WideStringClass desc, mission;
+  bool ok = SaveGameManager::Peek_Description("save\\webtest.sav", desc, mission);
+  StringClass map;
+  SaveGameManager::Peek_Map_Name("save\\webtest.sav", map);
+  fprintf(stderr, "[debug] saved: peek=%d desc='%ls' mission='%ls' map='%s'\n", (int)ok, desc.Peek_Buffer(),
+          mission.Peek_Buffer(), map.Peek_Buffer());
+}
+
+// As LoadSPGameMenuClass::Load_Game (non-replay path).
+static void Load_Test_Game(void) {
+  fprintf(stderr, "[debug] loading save\\webtest.sav\n");
+  if (GameModeManager::Find("Combat")->Is_Active() || GameModeManager::Find("Combat")->Is_Suspended()) {
+    GameInitMgrClass::End_Game();
+    GameModeManager::Safely_Deactivate();
+  }
+  GameInitMgrClass::Initialize_SP();
+  GameInitMgrClass::Start_Game("save\\webtest.sav", -1, 0);
+  cGod::Reset_Inventory();
+}

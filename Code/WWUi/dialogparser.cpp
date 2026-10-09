@@ -222,7 +222,22 @@ void DialogParserClass::Parse_Template(int res_id, int *dlg_width, int *dlg_heig
       //
       if (ctrl_type == 0) {
         ::_wcsupr(text_buffer);
-        if (::wcsstr(text_buffer, L"TRACKBAR") != 0) {
+        // Microsoft's rc stores the predefined classes of generic CONTROL
+        // statements ("Button", "Static", ...) as ordinals; llvm-rc keeps the
+        // name, so map the names to the same ordinals here.
+        if (::wcscmp(text_buffer, L"BUTTON") == 0) {
+          ctrl_type = BUTTON;
+        } else if (::wcscmp(text_buffer, L"EDIT") == 0) {
+          ctrl_type = EDIT;
+        } else if (::wcscmp(text_buffer, L"STATIC") == 0) {
+          ctrl_type = STATIC;
+        } else if (::wcscmp(text_buffer, L"LISTBOX") == 0) {
+          ctrl_type = LIST_BOX;
+        } else if (::wcscmp(text_buffer, L"SCROLLBAR") == 0) {
+          ctrl_type = SCROLL_BAR;
+        } else if (::wcscmp(text_buffer, L"COMBOBOX") == 0) {
+          ctrl_type = COMBOBOX;
+        } else if (::wcsstr(text_buffer, L"TRACKBAR") != 0) {
           ctrl_type = SLIDER;
         } else if (::wcsstr(text_buffer, L"TABCONTROL") != 0) {
           ctrl_type = TAB;
