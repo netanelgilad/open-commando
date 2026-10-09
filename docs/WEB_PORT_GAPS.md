@@ -69,8 +69,8 @@ the main menu ~2.5 s.
 - **Builds:** `build/wasm-release` (-O3, no WWDEBUG or asserts, function names
   kept for profiles) is served at `/`. `build/wasm` (debug: -O0, ASSERTIONS,
   WWDEBUG logs) is served at `/dbg/` on the same origin, so both share the
-  imported game data. `/tmp/br.sh` builds release and `/tmp/b.sh` builds
-  debug.
+  imported game data. `tools/build-web.sh release` and `tools/build-web.sh debug` build
+  them.
 - **WebGL state cache** (`gfx/gl_state.*`): only changed state is issued
   (4123 down to ~400 calls per frame). Re-issuing everything per draw had
   saturated Chrome's GPU process. New GL state code must go through `gls::`.

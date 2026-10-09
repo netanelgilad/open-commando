@@ -1,4 +1,4 @@
-// Page runtime for the Renegade web build: game-data import, Emscripten
+// Page runtime for the Open Commando browser build: game-data import, Emscripten
 // module setup, input forwarding (Win32 messages + DirectInput), audio
 // unlock and the cutscene <video> overlay.
 'use strict';
@@ -300,7 +300,7 @@ function importGameData() {
     w.onmessage = ({ data }) => {
       if (data.type === 'progress') {
         progressEl.value = data.done / data.total;
-        setStatus(`Copying your Renegade files into this browser (one time)\n${fmtBytes(data.done)} of ${fmtBytes(data.total)}\n${data.file}`);
+        setStatus(`Copying your game files into this browser (one time)\n${fmtBytes(data.done)} of ${fmtBytes(data.total)}\n${data.file}`);
       } else if (data.type === 'done') {
         progressEl.hidden = true;
         w.terminate();

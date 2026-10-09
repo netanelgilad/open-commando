@@ -136,7 +136,7 @@ get their game data into the browser:
 5. README:
    - what it is;
    - "bring your own copy" instructions (Steam/Origin/disc);
-   - browser requirements, the build instructions (emsdk, `/tmp/br.sh`
+   - browser requirements, the build instructions (emsdk, `tools/build-web.sh`
      equivalents as real scripts in the repo), and the test tooling.
 6. Move developer scripts that live in `/tmp` or the workspace into the repo
    (build scripts). Credentials and Steam download scripts stay outside.

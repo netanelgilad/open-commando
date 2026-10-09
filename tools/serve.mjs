@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Static server for the Renegade web build.
+// Static server for the Open Commando browser build.
 //
 //   /                -> engine/web (page, runtime, import worker)
 //   /renegade.*      -> the Emscripten build output (js, wasm)
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const engine = path.resolve(here, '..');          // engine/
-const workspace = path.resolve(engine, '..');     // ~/development/renegade
+const workspace = path.resolve(engine, '..');     // the folder holding engine/, game-data/, web-movies/
 const cfg = {
   port: Number(process.env.PORT || 8461),
   web: process.env.REBEL_WEB_DIR || path.join(engine, 'web'),
@@ -155,5 +155,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(cfg.port, '127.0.0.1', () => {
-  console.log(`renegade web on http://127.0.0.1:${cfg.port}  (web=${cfg.web} build=${cfg.build} game=${cfg.game})`);
+  console.log(`open-commando on http://127.0.0.1:${cfg.port}  (web=${cfg.web} build=${cfg.build} game=${cfg.game})`);
 });
