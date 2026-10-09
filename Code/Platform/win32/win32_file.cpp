@@ -128,6 +128,25 @@ struct FileObject : RebelHandle {
   // size (read, seek, truncate, stat, sync, close) keeps the semantics.
   std::vector<char> pending;
   static constexpr size_t WRITE_BUFFER = 1024 * 1024;
+  // Files created or truncated for writing (saves: chunked writes that seek
+  // back to patch chunk sizes) live in memory while open and are written out
+  // in one piece on close or flush; seeks, rewrites and reads stay in memory.
+  bool mem_file = false;
+  std::vector<char> mem;
+  size_t mem_pos = 0;
+  bool Write_Out() {
+    size_t done = 0;
+    while (done < mem.size()) {
+      ssize_t w = ::pwrite(fd, mem.data() + done, mem.size() - done, (off_t)done);
+      if (w < 0) {
+        if (errno == EINTR)
+          continue;
+        return false;
+      }
+      done += (size_t)w;
+    }
+    return ftruncate(fd, (off_t)mem.size()) == 0;
+  }
   bool Flush_Writes() {
     size_t done = 0;
     while (done < pending.size()) {
@@ -145,6 +164,8 @@ struct FileObject : RebelHandle {
   }
   FileObject() : RebelHandle(Kind::File) {}
   void Close() override {
+    if (fd >= 0 && mem_file)
+      Write_Out();
     if (fd >= 0 && !pending.empty())
       Flush_Writes();
     if (fd >= 0) {
@@ -263,6 +284,7 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD, LPSECURITY_ATTRI
   FileObject *f = new FileObject();
   f->fd = fd;
   f->pool_key = pool_key;
+  f->mem_file = (flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY;
   if ((flags & O_ACCMODE) == O_RDONLY) {
     f->read_only = true;
     f->size = (long long)st.st_size; // from the fstat above
@@ -315,6 +337,13 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read_out, LPOVER
   }
   size_t total = 0;
   while (total < n) {
+    if (f->mem_file) {
+      size_t take = f->mem_pos < f->mem.size() ? std::min<size_t>(n - total, f->mem.size() - f->mem_pos) : 0;
+      memcpy((char *)buf + total, f->mem.data() + f->mem_pos, take);
+      f->mem_pos += take;
+      total += take;
+      break;
+    }
     if (!f->pending.empty())
       f->Flush_Writes();
     ssize_t r = ::read(f->fd, (char *)buf + total, n - total);
@@ -340,6 +369,15 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD written, LPOVE
   if (!f) {
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
+  }
+  if (f->mem_file) {
+    if (f->mem.size() < f->mem_pos + n)
+      f->mem.resize(f->mem_pos + n);
+    memcpy(f->mem.data() + f->mem_pos, buf, n);
+    f->mem_pos += n;
+    if (written)
+      *written = n;
+    return TRUE;
   }
   f->pending.insert(f->pending.end(), (const char *)buf, (const char *)buf + n);
   if (f->pending.size() >= FileObject::WRITE_BUFFER && !f->Flush_Writes()) {
@@ -372,6 +410,19 @@ extern "C" DWORD SetFilePointer(HANDLE h, LONG dist, PLONG disthigh, DWORD metho
     SetLastError(ERROR_SUCCESS);
     return (DWORD)np;
   }
+  if (f->mem_file) {
+    long long base = method == FILE_CURRENT ? (long long)f->mem_pos : (method == FILE_END ? (long long)f->mem.size() : 0);
+    long long np = base + off;
+    if (np < 0) {
+      SetLastError(87);
+      return INVALID_SET_FILE_POINTER;
+    }
+    f->mem_pos = (size_t)np;
+    if (disthigh)
+      *disthigh = (LONG)((unsigned long long)np >> 32);
+    SetLastError(ERROR_SUCCESS);
+    return (DWORD)np;
+  }
   if (!f->pending.empty())
     f->Flush_Writes();
   off_t pos = ::lseek(f->fd, (off_t)off, whence);
@@ -389,6 +440,10 @@ extern "C" BOOL SetEndOfFile(HANDLE h) {
   FileObject *f = As_File(h);
   if (!f)
     return FALSE;
+  if (f->mem_file) {
+    f->mem.resize(f->mem_pos);
+    return TRUE;
+  }
   if (!f->pending.empty())
     f->Flush_Writes();
   off_t pos = ::lseek(f->fd, 0, SEEK_CUR);
@@ -397,6 +452,11 @@ extern "C" BOOL SetEndOfFile(HANDLE h) {
 
 extern "C" DWORD GetFileSize(HANDLE h, LPDWORD high) {
   FileObject *f = As_File(h);
+  if (f && f->mem_file) {
+    if (high)
+      *high = (DWORD)((unsigned long long)f->mem.size() >> 32);
+    return (DWORD)f->mem.size();
+  }
   if (f && f->read_only) { // size known at open; fstat is an OPFS round trip
     if (high)
       *high = (DWORD)((unsigned long long)f->size >> 32);
@@ -454,6 +514,8 @@ extern "C" BOOL GetFileInformationByHandle(HANDLE h, LPBY_HANDLE_FILE_INFORMATIO
 
 extern "C" BOOL FlushFileBuffers(HANDLE h) {
   FileObject *f = As_File(h);
+  if (f && f->mem_file && !f->Write_Out())
+    return FALSE;
   if (f && !f->pending.empty())
     f->Flush_Writes();
   return f && fsync(f->fd) == 0;
