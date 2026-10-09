@@ -31,7 +31,7 @@ function log(line) {
   if (!pendingLog.length) requestAnimationFrame(flushLog);
   pendingLog.push(line);
 }
-// Frame counter (top right): on by default, ?nofps hides it, F8 toggles.
+// Frame counter (top right): on by default, ?nofps hides it.
 // The engine calls Module.rebelFrame() once per presented frame.
 const fpsEl = $('fps');
 if (!params.has('nofps')) document.body.classList.add('show-fps');
@@ -46,7 +46,10 @@ function rebelFrameTick() {
     fpsFrames = 0; fpsSince = now; fpsWorst = 0;
   }
 }
-window.addEventListener('keydown', (e) => { if (e.code === 'F8') document.body.classList.toggle('show-fps'); }, true);
+// Alt+F toggles it (F8 is the game's console key); the page keeps the key.
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyF' && e.altKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) document.body.classList.toggle('show-fps'); }
+}, true);
 
 function setStatus(text) { statusEl.textContent = text; }
 function fmtBytes(n) { return n > 1 << 30 ? (n / (1 << 30)).toFixed(2) + ' GB' : (n / (1 << 20)).toFixed(0) + ' MB'; }

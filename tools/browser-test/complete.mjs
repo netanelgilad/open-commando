@@ -55,6 +55,34 @@ const watchdog = setInterval(async () => {
   for (const [k, c] of [...stacks.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4)) console.log(`HANG stack x${c}:\n    ${k}\n`);
   process.exit(3);
 }, 2000);
+// Audio meter: everything connected to an AudioContext's destination is also
+// fed to an analyser, so the test can tell whether sound actually comes out.
+await page.addInitScript(() => {
+  const orig = AudioNode.prototype.connect;
+  const meters = new Map();
+  AudioNode.prototype.connect = function (dest, ...rest) {
+    if (dest instanceof AudioDestinationNode) {
+      let m = meters.get(dest.context);
+      if (!m) { m = dest.context.createAnalyser(); m.fftSize = 2048; meters.set(dest.context, m); }
+      orig.call(this, m);
+    }
+    return orig.call(this, dest, ...rest);
+  };
+  window.__audioLevel = () => {
+    let peak = 0;
+    for (const m of meters.values()) {
+      const buf = new Float32Array(m.fftSize);
+      m.getFloatTimeDomainData(buf);
+      for (const v of buf) peak = Math.max(peak, Math.abs(v));
+    }
+    return { contexts: meters.size, peak };
+  };
+});
+const audioLevel = async (label) => {
+  let peak = 0, contexts = 0;
+  for (let i = 0; i < 20; i++) { const r = await page.evaluate(() => window.__audioLevel()); peak = Math.max(peak, r.peak); contexts = r.contexts; await page.waitForTimeout(100); }
+  console.log(`${stamp()} [audio] ${label}: output peak ${peak.toFixed(3)} (${contexts} contexts)`);
+};
 page.on("pageerror", (e) => { const l = `PAGEERROR ${e.message}\n${e.stack}`; lines.push(l); console.log(l); });
 await page.goto('http://127.0.0.1:8461/?nolock&quiet');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
@@ -62,6 +90,7 @@ await page.evaluate(() => setTimeout(() => document.getElementById('start').clic
 const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
 while (!menuAt) await new Promise((r) => setTimeout(r, 500));
 await page.waitForTimeout(5000);
+await audioLevel('main menu');
 await page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Start_Campaign(0), 0));
 await startProfiler();
 const dump = () => page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Input(), 0));
@@ -80,6 +109,7 @@ async function waitPlayable(label) {
 const step = process.env.STEP || 'all';
 await waitPlayable('mission');
 await call('_Rebel_Audio_Stats');
+await audioLevel('mission');
 await shot('playing');
 // Pause menu.
 await page.keyboard.press('Escape');

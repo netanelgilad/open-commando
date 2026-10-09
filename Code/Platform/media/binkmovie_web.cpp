@@ -5,8 +5,8 @@
 ** (tools/transcode-movies.sh) and served next to the game as
 ** movies/<name>.webm. Play() asks the page to show the video over the canvas;
 ** the movie is complete when the video ends, errors (no transcode yet), or
-** the player presses a key. Subtitles from the .bik sidecar are not shown yet
-** (tracked in docs/WEB_PORT_GAPS.md).
+** the player presses a key. Subtitles would come from data\subtitle.ini,
+** which the retail data doesn't ship, so there are none to show.
 */
 #include "BINKMovie.h"
 

@@ -11,8 +11,6 @@ where the shortcut lives and what "done" looks like.
   *Where:* `Code/Platform/audio/mss_openal.cpp`.
   *Done when:* a Web Audio convolver/reverb send (or OpenAL EFX if Emscripten
   gains it) honours the room type and per-sample effects level.
-- **Stream loop blocks** (`AIL_set_stream_loop_block`) are ignored; streams
-  loop the whole file.
 - **Stereo samples can't be panned** (OpenAL limitation); only mono pans.
 
 ## Graphics / text
@@ -55,8 +53,8 @@ where the shortcut lives and what "done" looks like.
   (`Sleep`, `WaitForSingleObject`); revisit once the main-loop model
   (ASYNCIFY/JSPI vs. worker) is settled.
 - **Cutscenes (Bink)** are transcoded offline to WebM (`tools/transcode-movies.sh`)
-  and played in a `<video>` overlay. Esc, Space or Enter skips. Bink subtitles
-  aren't shown.
+  and played in a `<video>` overlay. Esc, Space or Enter skips. (No subtitles: the
+  retail data has no subtitle.ini, so Windows shows none either.)
 - **Pointer lock and Escape**: Chrome uses Escape to leave pointer lock and
   doesn't pass it to the page, so the page sends the game an Escape when the
   lock is lost (`web/rebel.js`). Losing focus also opens the pause menu.

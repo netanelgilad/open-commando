@@ -128,8 +128,11 @@ void Load() {
   fclose(f);
 }
 
+// Written to a temporary file and renamed over the store, so a tab closed
+// mid-write can't leave a truncated registry (all settings lost).
 void Save() {
-  FILE *f = fopen(Store_Path(), "wb");
+  std::string tmp = std::string(Store_Path()) + ".tmp";
+  FILE *f = fopen(tmp.c_str(), "wb");
   if (!f)
     return; // no persistent mount (e.g. node tests): keep in memory only
   for (auto &k : Keys) {
@@ -144,7 +147,12 @@ void Save() {
       fputc('\n', f);
     }
   }
+  bool ok = fflush(f) == 0 && !ferror(f);
   fclose(f);
+  if (!ok || rename(tmp.c_str(), Store_Path()) != 0) {
+    fprintf(stderr, "[registry] could not save %s\n", Store_Path());
+    remove(tmp.c_str());
+  }
 }
 
 bool Key_Exists(const std::string &path) {
