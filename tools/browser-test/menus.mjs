@@ -36,16 +36,24 @@ async function list() {
   await page.waitForTimeout(500);
   return listing;
 }
+async function listActive() {
+  for (let i = 0; i < 20; i++) {
+    const l = await list();
+    if (l) return l;
+    await page.waitForTimeout(1000);
+  }
+  throw new Error('no active dialog');
+}
 const press = (id) => page.evaluate((i) => setTimeout(() => Module._Rebel_Debug_Command(i), 0), id);
 const buttons = (l) => l.controls.filter((c) => /Button|MenuEntry/.test(c.type) && !c.disabled && !c.hidden && c.text);
 for (const name of (process.env.MENU || 'Options').split('/')) {
-  const cur = await list();
+  const cur = await listActive();
   const target = buttons(cur).find((b) => b.text.toLowerCase().includes(name.toLowerCase()));
   if (!target) { console.log('no such button: ' + name); process.exit(1); }
   await press(target.id);
   await page.waitForTimeout(3000);
 }
-const opts = await list();
+const opts = await listActive();
 // CLICKS="x,y;x,y" clicks inside the opened menu (screenshots after each)
 // instead of walking its buttons.
 if (process.env.CLICKS) {
@@ -55,7 +63,10 @@ if (process.env.CLICKS) {
     await page.mouse.move(x, y);
     await page.waitForTimeout(300);
     await page.mouse.down(); await page.waitForTimeout(100); await page.mouse.up();
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1500);
+    // PRESS="KeyI" types that key after each click (e.g. to rebind a control).
+    if (process.env.PRESS) { await page.keyboard.press(process.env.PRESS); await page.waitForTimeout(500); }
+    await page.waitForTimeout(1000);
     await list();
     await page.screenshot({ path: `${outDir}/menu-click-${n++}.png` });
   }

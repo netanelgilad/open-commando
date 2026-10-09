@@ -80,7 +80,8 @@ async function waitPlayable(label) {
 let level = '';
 page.on('console', (m) => { const r = /Load_Level.*?(M\d\d)|loading level (\S+)|Loading (M\d\d)\.mix/i.exec(m.text()); if (r) level = r[1] || r[2] || r[3]; });
 const t0m = Date.now();
-for (let mission = 0; mission < 14; mission++) {
+// M13 then M01-M11: 12 missions, then the finale and credits.
+for (let mission = 0; mission < 12; mission++) {
   const started = Date.now();
   await waitPlayable(`mission ${mission}`);
   await call('_Rebel_Audio_Stats');
@@ -95,6 +96,9 @@ for (let mission = 0; mission < 14; mission++) {
   await shot(`campaign-${mission}-won`);
   await page.keyboard.press('Enter');
 }
+await page.waitForTimeout(60000);
+await call('_Rebel_Debug_Dump');
+await shot('campaign-end');
 console.log(`campaign done in ${((Date.now() - t0m) / 60000).toFixed(1)} min`);
 clearInterval(skipper);
 clearInterval(watchdog);
