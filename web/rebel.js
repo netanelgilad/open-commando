@@ -85,13 +85,28 @@ const WM = { KEYDOWN: 0x100, KEYUP: 0x101, CHAR: 0x102, SYSKEYDOWN: 0x104, SYSKE
   LBUTTONDOWN: 0x201, LBUTTONUP: 0x202, RBUTTONDOWN: 0x204, RBUTTONUP: 0x205, MBUTTONDOWN: 0x207,
   MBUTTONUP: 0x208, MOUSEWHEEL: 0x20A, ACTIVATEAPP: 0x1C, ACTIVATE: 0x06, SETFOCUS: 0x07, KILLFOCUS: 0x08 };
 
+/* ------------------------------------------------------------- resolution */
+
+// Render at the window's size in device pixels (capped at 2560 wide), or at
+// ?res=WxH. The game reads it at startup, so a change needs a reload.
+function gameResolution() {
+  const m = /^(\d+)x(\d+)$/.exec(params.get('res') || '');
+  if (m) return `${m[1]}x${m[2]}`;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w = Math.round(window.innerWidth * dpr), h = Math.round(window.innerHeight * dpr);
+  const scale = Math.min(1, 2560 / w, 1600 / h);
+  w = Math.max(800, Math.round(w * scale / 8) * 8);
+  h = Math.max(600, Math.round(h * scale / 8) * 8);
+  return `${w}x${h}`;
+}
+
 /* ----------------------------------------------------------------- module */
 
 var Module = {
   rebelFrame: rebelFrameTick,
   rebelUseRaf: params.has('raf'),
   canvas,
-  arguments: (params.get('args') || '').split(' ').filter(Boolean),
+  arguments: [...(params.get('args') || '').split(' ').filter(Boolean), '--res=' + gameResolution()],
   print: (t) => log(t),
   printErr: (t) => log(t),
   locateFile: (p) => p,

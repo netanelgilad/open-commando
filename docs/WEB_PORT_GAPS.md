@@ -25,6 +25,11 @@ where the shortcut lives and what "done" looks like.
   canvas (`Rebel_JS_Set_Gamma` in `d3d9_device.cpp`). Check that Chrome keeps
   it on the GPU; if a non-default brightness costs frames, move it into a
   final present pass.
+- **Resolution** is chosen by the page: the window size in device pixels
+  (capped at 2560x1600), or `?res=WxH`. It is written to the registry before
+  WinMain (`main_web.cpp`), because the Windows game gets it from the separate
+  WWConfig tool. The in-game Video tab only displays it, and a change needs a
+  reload. Menus are 4:3 layouts stretched to the window, as on Windows.
 - **Frame grabber** (AVI movie capture, developer tool) is inert.
 
 ## Text encoding
@@ -73,6 +78,17 @@ where the shortcut lives and what "done" looks like.
   build (and possibly JSPI instead of ASYNCIFY) is still to do.
 - **Pointer lock only**: mouse-look needs pointer lock (click the canvas).
   Without it, for example with `?nolock`, the mouse only drives the menu cursor.
+
+## Verified
+
+`tools/browser-test/complete.mjs` checks, in M13:
+- Escape opens the EVA menu.
+- Save writes save\webtest.sav and its description and map read back.
+- Walking away and then loading puts the player back where they saved.
+- Winning shows the score screen, and Continue loads M01.
+- Samples and music streams are playing.
+
+`menus.mjs` opens every Options sub-menu, and `eva.mjs` opens every EVA tab.
 
 ## Open bugs
 

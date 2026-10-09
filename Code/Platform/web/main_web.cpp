@@ -24,7 +24,27 @@
 #include <emscripten/wasmfs.h>
 #endif
 
+#include "registry.h"
+#include "_globals.h"
+#include "dx8wrapper.h"
+
 int PASCAL WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmdline, int show);
+
+// The Windows game takes its resolution from the registry, written by the
+// separate WWConfig tool. Here the page chooses it (--res=WxH, from the
+// window size or ?res=) and it is stored the same way before WinMain runs.
+static void Store_Resolution(int w, int h) {
+  RegistryClass reg(APPLICATION_SUB_KEY_NAME_RENDER);
+  if (!reg.Is_Valid())
+    return;
+  reg.Set_String(VALUE_NAME_RENDER_DEVICE_NAME, "WebGL 2.0 (Rebel D3D9 fixed-function)");
+  reg.Set_Int(VALUE_NAME_RENDER_DEVICE_WIDTH, w);
+  reg.Set_Int(VALUE_NAME_RENDER_DEVICE_HEIGHT, h);
+  reg.Set_Int(VALUE_NAME_RENDER_DEVICE_DEPTH, 32);
+  reg.Set_Int(VALUE_NAME_RENDER_DEVICE_WINDOWED, 1);
+  reg.Set_Int(VALUE_NAME_RENDER_DEVICE_TEXTURE_DEPTH, 32);
+  fprintf(stderr, "[rebel] resolution %dx%d\n", w, h);
+}
 extern "C" void Rebel_Set_Command_Line(const char *cmd);
 
 int main(int argc, char **argv) {
@@ -61,6 +81,12 @@ int main(int argc, char **argv) {
   // Command line: Game.exe plus whatever the page passed (e.g. -nointro).
   std::string cmd = "Game.exe";
   for (int i = 1; i < argc; i++) {
+    int w = 0, h = 0;
+    if (sscanf(argv[i], "--res=%dx%d", &w, &h) == 2) {
+      if (w >= 640 && h >= 480 && w <= 7680 && h <= 4320)
+        Store_Resolution(w, h);
+      continue;
+    }
     cmd += ' ';
     cmd += argv[i];
   }

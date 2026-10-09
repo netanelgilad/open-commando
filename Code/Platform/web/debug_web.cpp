@@ -55,6 +55,13 @@ extern "C" void Rebel_Debug_Save(void) { PendingSave = 1; }
 extern "C" void Rebel_Debug_Load(void) { PendingLoad = 1; }
 extern "C" void Rebel_Debug_Win_Mission(void) { PendingWin = 1; }
 static int PendingEva = -1;
+// Test hooks for walking the menus: list the active dialog's controls, and
+// press a control (as a click on it would, through On_Command).
+static int PendingCommand = 0;
+extern "C" void Rebel_Debug_Command(int ctrl_id) { PendingCommand = ctrl_id; }
+static void List_Controls(void);
+static bool PendingList = false;
+extern "C" void Rebel_Debug_List_Controls(void) { PendingList = true; }
 extern "C" void Rebel_Debug_Open_Eva(int tab) { PendingEva = tab; }
 #include "combat.h"
 #include "dlgevaencyclopedia.h"
@@ -91,6 +98,18 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
     PendingEva = -1;
     fprintf(stderr, "[debug] opening EVA tab %d\n", tab);
     EVAEncyclopediaMenuClass::Display((EVAEncyclopediaMenuClass::TAB_ID)tab);
+  }
+  if (PendingList) {
+    PendingList = false;
+    List_Controls();
+  }
+  if (PendingCommand) {
+    int id = PendingCommand;
+    PendingCommand = 0;
+    if (DialogBaseClass *dlg = DialogMgrClass::Get_Active_Dialog()) {
+      fprintf(stderr, "[debug] dialog %d: command %d\n", dlg->Get_Dlg_ID(), id);
+      dlg->On_Command(id, 0, 0);
+    }
   }
   if (PendingWin) {
     PendingWin = 0;
@@ -206,4 +225,24 @@ static void Load_Test_Game(void) {
   GameInitMgrClass::Initialize_SP();
   GameInitMgrClass::Start_Game("save\\webtest.sav", -1, 0);
   cGod::Reset_Inventory();
+}
+
+#include "dialogcontrol.h"
+#include <typeinfo>
+
+static void List_Controls(void) {
+  DialogBaseClass *dlg = DialogMgrClass::Get_Active_Dialog();
+  if (!dlg) {
+    fprintf(stderr, "[debug] controls: no active dialog\n");
+    return;
+  }
+  fprintf(stderr, "[debug] controls of dialog %d (%d):\n", dlg->Get_Dlg_ID(), dlg->Get_Control_Count());
+  for (int i = 0; i < dlg->Get_Control_Count(); i++) {
+    DialogControlClass *c = dlg->Get_Control(i);
+    const RectClass &r = c->Get_Window_Rect();
+    StringClass text;
+    WideStringClass(c->Get_Text()).Convert_To(text);
+    fprintf(stderr, "[debug]   ctl %d %s at %.0f,%.0f-%.0f,%.0f %s%s'%s'\n", c->Get_ID(), typeid(*c).name(), r.Left, r.Top,
+            r.Right, r.Bottom, c->Is_Enabled() ? "" : "disabled ", c->Is_Visible() ? "" : "hidden ", text.Peek_Buffer());
+  }
 }
