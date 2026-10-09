@@ -38,4 +38,4 @@ target_link_libraries(WWNet
 )
 # FIXME: Blast from the past: unresolved bug from 2002
 # With /Ob2 on Release Renegade.exe produces 0xc0000005 exception on exit
-target_compile_options(WWNet PRIVATE "$<$<CONFIG:Release>:/Ob1>")
+target_compile_options(WWNet PRIVATE "$<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/Ob1>")

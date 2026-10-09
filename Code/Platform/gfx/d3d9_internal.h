@@ -19,10 +19,13 @@
 
 #include <GLES3/gl3.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "gl_state.h"
 
 namespace rebel_d3d {
 
@@ -251,6 +254,8 @@ struct FfpProgram {
   GLint u_point_size;
   // attribute locations: position, blend weights, normal, diffuse, specular, texcoords 0..7
   GLint a_position, a_weights, a_normal, a_diffuse, a_specular, a_texcoord[8];
+  // Last values uploaded per uniform location: unchanged uniforms are skipped.
+  std::unordered_map<GLint, std::array<float, 16>> *uniform_cache = nullptr;
 };
 
 // Builds (and caches) the GLSL program for a key. Returns nullptr on failure.

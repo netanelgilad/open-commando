@@ -7,7 +7,7 @@ mkdirSync(outDir, { recursive: true });
 const secs = Number(process.argv[2] || 15);
 const ctx = await chromium.launchPersistentContext(new URL('./profile/', import.meta.url).pathname, {
   channel: 'chromium', headless: !process.env.HEADED, viewport: { width: 1280, height: 800 },
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required', ...(process.env.NOTHROTTLE ? ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] : [])],
 });
 const page = ctx.pages()[0] || (await ctx.newPage());
 let menuAt = 0, playing = false;
@@ -18,7 +18,7 @@ page.on('console', (m) => {
   if (/cinematic=0 .*sync=([1-9]\d{4,})/.test(t)) playing = true;
   if (/\[d3d9\] frame|\[gpu\]|fps/i.test(t)) console.log(`${((Date.now() - t0) / 1000).toFixed(0)} ${t}`.slice(0, 200));
 });
-await page.goto('http://127.0.0.1:8461/?nolock' + (process.env.QUIET ? '&quiet' : ''));
+await page.goto((process.env.BASE || 'http://127.0.0.1:8461/') + '?nolock' + (process.env.QUIET ? '&quiet' : ''));
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
 const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);

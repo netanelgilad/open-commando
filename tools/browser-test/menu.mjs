@@ -21,7 +21,7 @@ page.on('console', (m) => {
   if (!/\[d3d9\] frame|DefinitionHash|Hits: 0/.test(t)) lines.push(`${((Date.now() - t0) / 1000).toFixed(1)} ${t}`);
 });
 page.on('pageerror', (e) => lines.push(`PAGEERROR ${e.message}\n${e.stack}`));
-await page.goto('http://127.0.0.1:8461/?nolock');
+await page.goto((process.env.BASE || 'http://127.0.0.1:8461/') + '?nolock');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
 const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);

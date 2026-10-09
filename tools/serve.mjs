@@ -6,6 +6,7 @@
 //   /gamedata/...    -> the user's own Renegade install (imported into OPFS)
 //   /gamedata/manifest.json  generated listing of the files to import
 //   /movies/*.webm   -> transcoded cutscenes
+//   /dbg/...         -> the same, with the debug build of renegade.*
 //
 // Sends COOP/COEP so the page is cross-origin isolated (SharedArrayBuffer
 // for pthreads), supports Range requests, and binds to localhost only:
@@ -21,7 +22,10 @@ const workspace = path.resolve(engine, '..');     // ~/development/renegade
 const cfg = {
   port: Number(process.env.PORT || 8461),
   web: process.env.REBEL_WEB_DIR || path.join(engine, 'web'),
-  build: process.env.REBEL_BUILD_DIR || path.join(engine, 'build/wasm/bin'),
+  // Optimized build at /, the debug build (asserts, WWDEBUG logs) under /dbg/
+  // on the same origin, so both share the imported game data.
+  build: process.env.REBEL_BUILD_DIR || path.join(engine, 'build/wasm-release/bin'),
+  debugBuild: process.env.REBEL_DEBUG_BUILD_DIR || path.join(engine, 'build/wasm/bin'),
   game: process.env.REBEL_GAME_DIR || path.join(workspace, 'game-data/renegade'),
   movies: process.env.REBEL_MOVIES_DIR || path.join(workspace, 'web-movies'),
 };
@@ -114,7 +118,10 @@ function inside(base, urlPath) {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
-    const p = decodeURIComponent(url.pathname);
+    let p = decodeURIComponent(url.pathname);
+    const debug = p === '/dbg' || p.startsWith('/dbg/');
+    if (p === '/dbg') { res.writeHead(302, { Location: '/dbg/' + url.search }); return res.end(); }
+    if (debug) p = p.slice(4);
     if (p === '/gamedata/manifest.json') {
       headers(res, MIME['.json'], { 'Cache-Control': 'no-store' });
       return res.end(JSON.stringify(await manifest()));
@@ -130,7 +137,7 @@ const server = createServer(async (req, res) => {
       file = inside(cfg.movies, p.slice('/movies/'.length));
       cache = 'public, max-age=86400';
     } else if (/^\/renegade\.(js|wasm|worker\.js|data)$/.test(p)) {
-      file = inside(cfg.build, p.slice(1));
+      file = inside(debug ? cfg.debugBuild : cfg.build, p.slice(1));
     } else {
       file = inside(cfg.web, p === '/' ? 'index.html' : p.slice(1));
     }

@@ -367,8 +367,10 @@ if(REBEL_PORTABLE)
         -sWASMFS
         -sASYNCIFY
         -sASYNCIFY_STACK_SIZE=4194304
-        -sASSERTIONS=1
-        -sSTACK_OVERFLOW_CHECK=2
+        # Runtime checks only in debug builds; release builds optimize at link.
+        "$<IF:$<CONFIG:Debug>,-sASSERTIONS=1,-sASSERTIONS=0>"
+        "$<$<CONFIG:Debug>:-sSTACK_OVERFLOW_CHECK=2>"
+        "$<$<NOT:$<CONFIG:Debug>>:-O3>"
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=268435456
         -sMAXIMUM_MEMORY=4294967296
@@ -383,5 +385,5 @@ if(REBEL_PORTABLE)
         "SHELL:-sEXPORTED_FUNCTIONS=_main,_Rebel_Post_Message,_Rebel_Set_Screen_Size,_Rebel_Input_Key,_Rebel_Input_Mouse_Move,_Rebel_Input_Mouse_Wheel,_Rebel_Input_Mouse_Button,_Rebel_Input_Release_All,_Rebel_Audio_Update,_Rebel_Debug_Dump,_Rebel_Input_Set_Cursor,_Rebel_Debug_Start_Campaign,_Rebel_Debug_Input,_Rebel_Debug_Bring_Target,_Rebel_Debug_Damage_Target,_Rebel_Debug_Save,_Rebel_Debug_Load,_Rebel_Debug_Win_Mission,_Rebel_Audio_Stats,_Rebel_Debug_Open_Eva,_Rebel_Debug_Command,_Rebel_Debug_List_Controls,_malloc,_free"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=callMain,ccall,cwrap,UTF8ToString,stringToUTF8,HEAPU16"
     )
-    set_target_properties(Renegade PROPERTIES SUFFIX ".js" OUTPUT_NAME "renegade" OUTPUT_NAME_DEBUG "renegade" OUTPUT_NAME_RELWITHDEBINFO "renegade")
+    set_target_properties(Renegade PROPERTIES SUFFIX ".js" OUTPUT_NAME "renegade" OUTPUT_NAME_DEBUG "renegade" OUTPUT_NAME_RELWITHDEBINFO "renegade" OUTPUT_NAME_RELEASE "renegade")
 endif()

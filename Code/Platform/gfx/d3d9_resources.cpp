@@ -37,6 +37,7 @@ Surface::Surface(Device *device, Kind kind, UINT width, UINT height, D3DFORMAT f
 
 Surface::~Surface() {
   if (Fbo)
+    gls::Forget_Framebuffer(Fbo);
     glDeleteFramebuffers(1, &Fbo);
   if (Renderbuffer)
     glDeleteRenderbuffers(1, &Renderbuffer);
@@ -102,7 +103,7 @@ GLuint Surface::Framebuffer() {
   if (Fbo)
     return Fbo;
   glGenFramebuffers(1, &Fbo);
-  glBindFramebuffer(GL_FRAMEBUFFER, Fbo);
+  gls::Bind_Framebuffer(GL_FRAMEBUFFER, Fbo);
   if (SurfaceKind == Kind::TextureLevel && Owner) {
     Owner->Upload();
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Owner->Gl, (GLint)Level);
@@ -120,12 +121,9 @@ void Surface::Read_Back() {
   if (!gpu || Format_Info(Format).compressed)
     return;
   std::vector<uint8_t> rgba((size_t)Width * Height * 4);
-  GLint prev = 0;
-  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
-  glBindFramebuffer(GL_FRAMEBUFFER, Framebuffer());
+  gls::Bind_Framebuffer(GL_FRAMEBUFFER, Framebuffer());
   glPixelStorei(GL_PACK_ALIGNMENT, 1);
   glReadPixels(0, 0, (GLsizei)Width, (GLsizei)Height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-  glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev);
   Encode_From_RGBA8(Format, rgba.data(), Width, Height, Bits(), Pitch());
   if (Owner)
     Owner->GpuNewer = false;
@@ -185,6 +183,7 @@ Texture::~Texture() {
       delete l.surface;
     }
   if (Gl)
+    gls::Forget_Texture(Gl);
     glDeleteTextures(1, &Gl);
 }
 
@@ -265,11 +264,9 @@ void Texture::Upload() {
   for (const LevelData &l : Levels)
     if (l.dirty)
       Stat_Texture_Bytes += l.bits.size();
-  GLint prev_unit = 0, prev_tex = 0;
-  glGetIntegerv(GL_ACTIVE_TEXTURE, &prev_unit);
-  glActiveTexture(UploadUnit);
-  glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
-  glBindTexture(GL_TEXTURE_2D, Gl);
+  // A spare unit, so draw bindings stay put; the state cache tracks it.
+  gls::Active_Texture(UploadUnit);
+  gls::Bind_Texture_2D(Gl);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
   if (Is_Render_Target()) {
@@ -313,8 +310,6 @@ void Texture::Upload() {
       }
     }
   }
-  glBindTexture(GL_TEXTURE_2D, (GLuint)prev_tex);
-  glActiveTexture((GLenum)prev_unit);
 }
 
 /* ======================================================== VertexBuffer */
@@ -323,13 +318,14 @@ VertexBuffer::VertexBuffer(Device *device, UINT length, DWORD usage, DWORD fvf, 
     : Resource(device), Usage(usage), Fvf(fvf), Pool(pool) {
   Data.assign(length, 0);
   glGenBuffers(1, &Gl);
-  glBindBuffer(GL_ARRAY_BUFFER, Gl);
+  gls::Bind_Buffer(GL_ARRAY_BUFFER, Gl);
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)length, nullptr,
                (usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 }
 
 VertexBuffer::~VertexBuffer() {
   if (Gl)
+    gls::Forget_Buffer(Gl);
     glDeleteBuffers(1, &Gl);
 }
 
@@ -384,7 +380,7 @@ HRESULT VertexBuffer::GetDesc(D3DVERTEXBUFFER_DESC *desc) {
 void VertexBuffer::Upload() {
   if (DirtyEnd <= DirtyBegin)
     return;
-  glBindBuffer(GL_ARRAY_BUFFER, Gl);
+  gls::Bind_Buffer(GL_ARRAY_BUFFER, Gl);
   glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)DirtyBegin, (GLsizeiptr)(DirtyEnd - DirtyBegin), Data.data() + DirtyBegin);
   Stat_Buffer_Bytes += DirtyEnd - DirtyBegin;
   Stat_Buffer_Uploads++;
@@ -401,6 +397,7 @@ IndexBuffer::IndexBuffer(Device *device, UINT length, DWORD usage, D3DFORMAT fmt
 
 IndexBuffer::~IndexBuffer() {
   if (Gl)
+    gls::Forget_Buffer(Gl);
     glDeleteBuffers(1, &Gl);
 }
 
@@ -453,7 +450,7 @@ HRESULT IndexBuffer::GetDesc(D3DINDEXBUFFER_DESC *desc) {
 
 // The element binding belongs to the bound VAO; the device rebinds before draws.
 void IndexBuffer::Upload() {
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Gl);
+  gls::Bind_Buffer(GL_ELEMENT_ARRAY_BUFFER, Gl);
   if (GlSize != Data.size()) {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)Data.size(), Data.data(),
                  (Usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);

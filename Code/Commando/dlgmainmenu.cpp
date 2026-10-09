@@ -421,7 +421,8 @@ void MainMenuDialogClass::Display(void) {
     //
     dialog->Start_Dialog();
 #ifdef REBEL_PORTABLE
-    WWDEBUG_SAY(("MainMenuDialogClass: started, active dialog %p\n", (void *)DialogMgrClass::Get_Active_Dialog()));
+    // Tagged and unconditional: the page tests wait for it in release builds too.
+    fprintf(stderr, "[rebel] MainMenuDialogClass: started\n");
 #endif
     REF_PTR_RELEASE(dialog);
 

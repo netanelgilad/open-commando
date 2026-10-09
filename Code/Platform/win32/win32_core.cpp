@@ -182,31 +182,39 @@ EM_ASYNC_JS(void, Rebel_JS_Wait_Frame, (void), {
       tq.sum = 0; tq.n = 0; tq.max = 0; tq.since = performance.now();
     }
   }
-  // Pacing: the game paces itself to ~60 fps and yields with a zero-delay
-  // task instead of waiting for requestAnimationFrame. rAF follows the
-  // compositor's BeginFrame clock, which can tick far below the display
-  // rate (no physical display, remote sessions, busy compositor) and would
-  // cap the game there; the canvas still presents at the next composite.
-  // ?raf restores rAF pacing. Hidden tabs fall back to a 16 ms timer.
-  var now = performance.now();
-  var budget = 1000 / 60 - (now - (Module.rebelLastYield || 0));
-  await new Promise(function(resolve) {
-    var visible = typeof document !== 'undefined' && document.visibilityState === 'visible';
-    if (!visible)
-      setTimeout(resolve, 16);
-    else if (Module.rebelUseRaf && typeof requestAnimationFrame === 'function')
-      requestAnimationFrame(function() { resolve(); });
-    else if (budget > 1)
-      setTimeout(resolve, budget);
-    else {
-      if (!Module.rebelYieldChannel) {
-        Module.rebelYieldChannel = new MessageChannel();
-        Module.rebelYieldChannel.port1.onmessage = function() { var r = Module.rebelYieldResolve; Module.rebelYieldResolve = null; if (r) r(); };
-      }
-      Module.rebelYieldResolve = resolve;
-      Module.rebelYieldChannel.port2.postMessage(0);
-    }
-  });
+  // Pacing. A perpetual requestAnimationFrame loop measures how fast rAF
+  // really ticks. When it follows the display (>= ~45 Hz), each frame waits
+  // for it: vsync-aligned, no tearing, idle CPU in between. When rAF is
+  // throttled (no physical display, remote sessions: 5 Hz was seen), the game
+  // paces itself to 60 fps with zero-delay MessageChannel hops until the
+  // frame's time is used. Timers aren't used for that: on such machines
+  // setTimeout(10) fired 50-60 ms late. ?raf / ?noraf force either mode.
+  // Hidden tabs use a 16 ms timer (the browser throttles them anyway).
+  if (!Module.rebelRafProbe && typeof requestAnimationFrame === 'function') {
+    var probe = Module.rebelRafProbe = { last: 0, avg: 100 };
+    var tick = function(t) {
+      if (probe.last) probe.avg += (Math.min(t - probe.last, 250) - probe.avg) * 0.1;
+      probe.last = t;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  if (!Module.rebelYieldChannel) {
+    Module.rebelYieldChannel = new MessageChannel();
+    Module.rebelYieldChannel.port1.onmessage = function() { var r = Module.rebelYieldResolve; Module.rebelYieldResolve = null; if (r) r(); };
+  }
+  var hop = function() { return new Promise(function(resolve) { Module.rebelYieldResolve = resolve; Module.rebelYieldChannel.port2.postMessage(0); }); };
+  var visible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+  var mode = Module.rebelPacing || 'auto';
+  var rafOk = Module.rebelRafProbe && Module.rebelRafProbe.avg < 22;
+  if (!visible) {
+    await new Promise(function(resolve) { setTimeout(resolve, 16); });
+  } else if (mode === 'raf' || (mode === 'auto' && rafOk)) {
+    await new Promise(function(resolve) { requestAnimationFrame(function() { resolve(); }); });
+  } else {
+    var target = (Module.rebelLastYield || 0) + 1000 / 60;
+    do { await hop(); } while (performance.now() < target - 0.5);
+  }
   Module.rebelLastYield = performance.now();
   if (gl && tq && tq.ext && !tq.cur) { tq.cur = gl.createQuery(); gl.beginQuery(tq.ext.TIME_ELAPSED_EXT, tq.cur); }
 });

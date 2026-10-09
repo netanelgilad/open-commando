@@ -107,7 +107,7 @@ function gameResolution() {
 
 var Module = {
   rebelFrame: rebelFrameTick,
-  rebelUseRaf: params.has('raf'),
+  rebelPacing: params.has('raf') ? 'raf' : params.has('noraf') ? 'spin' : 'auto', // see Rebel_JS_Wait_Frame
   canvas,
   arguments: [...(params.get('args') || '').split(' ').filter(Boolean), '--res=' + gameResolution()],
   print: (t) => log(t),

@@ -487,7 +487,7 @@ FfpProgram *Ffp_Program_For(const FfpKey &key) {
   p->a_normal = glGetAttribLocation(prog, "a_normal");
   p->a_diffuse = glGetAttribLocation(prog, "a_diffuse");
   p->a_specular = glGetAttribLocation(prog, "a_specular");
-  glUseProgram(prog);
+  gls::Use_Program(prog);
   for (int i = 0; i < 8; i++)
     if (p->u_sampler[i] >= 0)
       glUniform1i(p->u_sampler[i], i);
@@ -498,8 +498,11 @@ FfpProgram *Ffp_Program_For(const FfpKey &key) {
 
 void Ffp_Clear_Cache() {
   for (auto &e : Cache)
-    if (e.second)
+    if (e.second) {
+      gls::Forget_Program(e.second->program);
       glDeleteProgram(e.second->program);
+      delete e.second->uniform_cache;
+    }
   Cache.clear();
 }
 

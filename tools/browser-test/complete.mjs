@@ -84,7 +84,7 @@ const audioLevel = async (label) => {
   console.log(`${stamp()} [audio] ${label}: output peak ${peak.toFixed(3)} (${contexts} contexts)`);
 };
 page.on("pageerror", (e) => { const l = `PAGEERROR ${e.message}\n${e.stack}`; lines.push(l); console.log(l); });
-await page.goto('http://127.0.0.1:8461/?nolock&quiet');
+await page.goto((process.env.BASE || 'http://127.0.0.1:8461/') + '?nolock&quiet');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
 const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
