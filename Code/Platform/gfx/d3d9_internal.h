@@ -406,6 +406,7 @@ private:
 
   GLuint Vao = 0;
   GLuint ScratchVbo = 0, ScratchIbo = 0;
+  std::vector<uint8_t> RebasedIndices; // dynamic-stream draws (DrawIndexedPrimitive)
   GLuint BlitProgram = 0, GammaTexture = 0;
 };
 

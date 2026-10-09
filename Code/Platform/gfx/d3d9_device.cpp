@@ -1233,27 +1233,68 @@ HRESULT Device::DrawIndexedPrimitive(D3DPRIMITIVETYPE type, INT base_vertex, UIN
   GLenum mode = Prim_Mode(type, prim_count, n);
   bool i32 = Indices->Format == D3DFMT_INDEX32;
   UINT isize = i32 ? 4u : 2u;
-  bool ok;
+  const std::vector<uint8_t> &idata = Indices->Data;
+  size_t first = std::min<size_t>((size_t)start_index * isize, idata.size());
+  size_t count = std::min<size_t>((size_t)n, (idata.size() - first) / isize);
+
   if (Stream->Usage & D3DUSAGE_DYNAMIC) {
-    // Vertices from the index space's vertex 0 (base) up to the last used one.
-    Stream_Range((UINT)base, (min_index + num_vertices) * stride);
-    ok = Prepare_Draw(0, ScratchVbo, stride, Fvf);
-  } else {
-    Stream->Upload();
-    ok = Prepare_Draw((UINT)base, Stream->Gl, stride, Fvf);
+    // Upload only the vertices this draw's indices reference (WW3D declares
+    // the whole filled range of its shared buffer for every draw), with the
+    // indices rebased to that range.
+    (void)min_index;
+    (void)num_vertices;
+    uint32_t lo = 0xFFFFFFFFu, hi = 0;
+    if (i32) {
+      const uint32_t *ix = (const uint32_t *)(idata.data() + first);
+      for (size_t i = 0; i < count; i++) {
+        lo = std::min(lo, ix[i]);
+        hi = std::max(hi, ix[i]);
+      }
+    } else {
+      const uint16_t *ix = (const uint16_t *)(idata.data() + first);
+      for (size_t i = 0; i < count; i++) {
+        lo = std::min<uint32_t>(lo, ix[i]);
+        hi = std::max<uint32_t>(hi, ix[i]);
+      }
+    }
+    if (!count)
+      return D3D_OK;
+    Stream_Range((UINT)base + lo * stride, (hi - lo + 1) * stride);
+    if (!Prepare_Draw(0, ScratchVbo, stride, Fvf))
+      return D3D_OK;
+    RebasedIndices.resize(count * isize);
+    if (i32) {
+      const uint32_t *ix = (const uint32_t *)(idata.data() + first);
+      uint32_t *out = (uint32_t *)RebasedIndices.data();
+      for (size_t i = 0; i < count; i++)
+        out[i] = ix[i] - lo;
+    } else {
+      const uint16_t *ix = (const uint16_t *)(idata.data() + first);
+      uint16_t *out = (uint16_t *)RebasedIndices.data();
+      for (size_t i = 0; i < count; i++)
+        out[i] = (uint16_t)(ix[i] - lo);
+    }
+    gls::Bind_Buffer(GL_ELEMENT_ARRAY_BUFFER, ScratchIbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)RebasedIndices.size(), RebasedIndices.data(), GL_STREAM_DRAW);
+    Stat_Buffer_Bytes += RebasedIndices.size();
+    Stat_Buffer_Uploads++;
+    Primitives += (unsigned)n;
+    glDrawElements(mode, (GLsizei)count, i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT, nullptr);
+    return D3D_OK;
   }
-  if (!ok)
+
+  Stream->Upload();
+  if (!Prepare_Draw((UINT)base, Stream->Gl, stride, Fvf))
     return D3D_OK;
   Primitives += (unsigned)n;
   if (Indices->Usage & D3DUSAGE_DYNAMIC) {
-    const std::vector<uint8_t> &d = Indices->Data;
-    size_t first = std::min<size_t>((size_t)start_index * isize, d.size());
-    size_t bytes = std::min<size_t>((size_t)n * isize, d.size() - first);
+    // Just this draw's indices (see Stream_Range).
     gls::Bind_Buffer(GL_ELEMENT_ARRAY_BUFFER, ScratchIbo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)std::max<size_t>(bytes, 4), d.data() + first, GL_STREAM_DRAW);
-    Stat_Buffer_Bytes += bytes;
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)std::max<size_t>(count * isize, 4), idata.data() + first,
+                 GL_STREAM_DRAW);
+    Stat_Buffer_Bytes += count * isize;
     Stat_Buffer_Uploads++;
-    glDrawElements(mode, (GLsizei)(bytes / isize), i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT, nullptr);
+    glDrawElements(mode, (GLsizei)count, i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT, nullptr);
     return D3D_OK;
   }
   Indices->Upload(); // binds the element buffer into the VAO
