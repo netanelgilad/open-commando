@@ -70,4 +70,6 @@ build/
 build
 tools/browser-test/node_modules/
 tools/browser-test/profile/
+tools/browser-test/profile-*/
 tools/browser-test/out/
+/dist/

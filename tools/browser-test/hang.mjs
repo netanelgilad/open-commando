@@ -22,7 +22,7 @@ for (let attempt = 1; attempt <= tries; attempt++) {
   cdp.on('Tracing.dataCollected', (e) => chunks.push(...e.value));
   await cdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { recordMode: 'recordContinuously', includedCategories: ['disabled-by-default-v8.cpu_profiler', 'v8'] } });
   await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
-  const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
+  const skipper = setInterval(() => page.evaluate(() => { if (window.rebelMovieActive) Module.rebelStopMovie(); }).catch(() => {}), 500);
   while (!menuAt) await new Promise((r) => setTimeout(r, 200));
   await page.waitForTimeout(2000);
   await page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Start_Campaign(0), 0));

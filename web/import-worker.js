@@ -1,5 +1,5 @@
-// Copies the game files listed in gamedata/manifest.json into the Origin
-// Private File System (renegade/...). Runs in a worker because synchronous
+// Copies the game files (picked by the player, or listed in
+// gamedata/manifest.json when self-hosting) into the Origin Private File System (renegade/...). Runs in a worker because synchronous
 // access handles (the fast write path, and the only one Safari offers) are
 // worker-only. Files that already exist with the right size are skipped, so
 // an interrupted import resumes where it stopped.
@@ -20,10 +20,15 @@ async function existingSize(dir, name) {
   }
 }
 
+// Two sources: { manifestUrl, baseUrl } fetches files from the serving
+// machine (self-hosting); { files: [{ path, file }], version } copies File
+// objects the player picked from their own install.
 self.onmessage = async (ev) => {
-  const { manifestUrl, baseUrl } = ev.data;
+  const { manifestUrl, baseUrl, files: picked } = ev.data;
   try {
-    const manifest = await (await fetch(manifestUrl, { cache: 'no-store' })).json();
+    const manifest = picked
+      ? { version: ev.data.version, files: picked.map((f) => ({ path: f.path, size: f.file.size, file: f.file })) }
+      : await (await fetch(manifestUrl, { cache: 'no-store' })).json();
     const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('renegade', { create: true });
     const total = manifest.files.reduce((n, f) => n + f.size, 0);
     let done = 0;
@@ -39,9 +44,15 @@ self.onmessage = async (ev) => {
       const fh = await dir.getFileHandle(name, { create: true });
       const access = await fh.createSyncAccessHandle();
       access.truncate(0);
-      const res = await fetch(baseUrl + f.path.split('/').map(encodeURIComponent).join('/'));
-      if (!res.ok) throw new Error(`${f.path}: HTTP ${res.status}`);
-      const reader = res.body.getReader();
+      let body;
+      if (f.file) {
+        body = f.file.stream();
+      } else {
+        const res = await fetch(baseUrl + f.path.split('/').map(encodeURIComponent).join('/'));
+        if (!res.ok) throw new Error(`${f.path}: HTTP ${res.status}`);
+        body = res.body;
+      }
+      const reader = body.getReader();
       let offset = 0, lastReport = 0;
       for (;;) {
         const { value, done: eof } = await reader.read();

@@ -26,7 +26,7 @@ if (process.env.BOOT) {
   await bootCdp.send('Profiler.start');
 }
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
-const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
+const skipper = setInterval(() => page.evaluate(() => { if (window.rebelMovieActive) Module.rebelStopMovie(); }).catch(() => {}), 500);
 while (!menuAt) await new Promise((r) => setTimeout(r, 200));
 if (bootCdp) {
   const { profile } = await bootCdp.send('Profiler.stop');

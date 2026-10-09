@@ -258,22 +258,58 @@ const resumeAudio = () => audioContexts.forEach((c) => c.state !== 'running' && 
 
 /* ----------------------------------------------------------------- movies */
 
-let movieDone = null;
+// Cutscenes: the game's own .bik files from the imported data, decoded in the
+// page (bink-player.js). A transcoded movies/<name>.webm (self-hosting with
+// tools/transcode-movies.sh) is the fallback when the .bik isn't there.
+const movieCanvas = $('moviecanvas');
+let movieDone = null, binkPlayback = null;
+
+async function findMovieFile(name) {
+  try {
+    let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('renegade');
+    for (const part of ['data', 'movies']) {
+      let next = null;
+      for await (const [n, h] of dir.entries()) if (h.kind === 'directory' && n.toLowerCase() === part) next = h;
+      if (!next) return null;
+      dir = next;
+    }
+    const want = name.toLowerCase() + '.bik';
+    for await (const [n, h] of dir.entries()) if (h.kind === 'file' && n.toLowerCase() === want) return await h.getFile();
+  } catch (e) {}
+  return null;
+}
+
+function playWebm(name) {
+  movie.src = 'movies/' + encodeURIComponent(name.toLowerCase()) + '.webm';
+  movie.style.display = 'block';
+  movie.onended = () => Module.rebelStopMovie();
+  movie.onerror = () => { log('[movie] not available: ' + name); Module.rebelStopMovie(); };
+  movie.play().catch(() => Module.rebelStopMovie());
+}
+
 Module.rebelPlayMovie = (name, done) => {
   log('[movie] play ' + name);
   movieDone = done;
-  movie.src = 'movies/' + encodeURIComponent(name.toLowerCase()) + '.webm';
-  movie.style.display = 'block';
-  const finish = () => { Module.rebelStopMovie(); };
-  movie.onended = finish;
-  movie.onerror = () => { log('[movie] not available: ' + name); finish(); };
-  movie.play().catch(() => finish());
+  window.rebelMovieActive = true;
+  findMovieFile(name).then((file) => {
+    if (movieDone !== done) return; // stopped meanwhile
+    if (!file) return playWebm(name);
+    movieCanvas.style.display = 'block';
+    binkPlayback = BinkPlayer.play(file, movieCanvas, () => { binkPlayback = null; Module.rebelStopMovie(); });
+  });
 };
 Module.rebelStopMovie = () => {
+  if (binkPlayback) {
+    const p = binkPlayback;
+    binkPlayback = null;
+    p.stop(); // calls back into rebelStopMovie, now with no playback
+  }
+  movieCanvas.style.display = 'none';
   movie.pause();
   movie.removeAttribute('src');
   movie.load();
   movie.style.display = 'none';
+  window.rebelMovieActive = false;
   const d = movieDone;
   movieDone = null;
   if (d) d();
@@ -282,36 +318,158 @@ window.addEventListener('keydown', (e) => { if (movieDone && (e.code === 'Escape
 
 /* ----------------------------------------------------------------- import */
 
-async function haveGameData() {
+// Game data lives in the browser's private storage (OPFS, renegade/...),
+// copied once from either
+//  - a folder the player picks: their own install (public site), or
+//  - gamedata/ on the serving machine (self-hosting with tools/serve.mjs).
+// Nothing is uploaded anywhere: the copy stays in this browser.
+const LOCAL_IMPORT_VERSION = 'local-1';
+// What the engine needs, relative to the install folder.
+const REQUIRED_FILES = ['data/always.dat', 'data/always2.dat', 'data/m13.mix', 'data/m01.mix', 'ari_____.ttf', '54251___.ttf'];
+const ROOT_FILES = /\.(ttf|dat|ini|lcf|txt|016|256)$/i;
+
+async function storageRoot(create) {
+  return (await navigator.storage.getDirectory()).getDirectoryHandle('renegade', { create: !!create });
+}
+
+async function serverManifest() {
+  // Public builds (tools/deploy-web.sh) say so: no server copy to probe for.
+  if (document.querySelector('meta[name="rebel-gamedata"][content="none"]')) return null;
   try {
-    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('renegade');
-    const marker = await (await root.getFileHandle('.rebel-import')).getFile();
-    const manifest = await (await fetch('gamedata/manifest.json', { cache: 'no-store' })).json();
-    return (await marker.text()).trim() === String(manifest.version || 1);
+    const r = await fetch('gamedata/manifest.json', { cache: 'no-store' });
+    if (!r.ok || !(r.headers.get('content-type') || '').includes('json')) return null;
+    return await r.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function haveGameData(manifest) {
+  try {
+    const root = await storageRoot(false);
+    const marker = (await (await (await root.getFileHandle('.rebel-import')).getFile()).text()).trim();
+    if (manifest) return marker === String(manifest.version || 1);
+    return marker.length > 0;
   } catch (e) {
     return false;
   }
 }
 
-function importGameData() {
+function runImport(message) {
   return new Promise((resolve, reject) => {
     progressEl.hidden = false;
     const w = new Worker('import-worker.js');
     w.onmessage = ({ data }) => {
       if (data.type === 'progress') {
         progressEl.value = data.done / data.total;
-        setStatus(`Copying your game files into this browser (one time)\n${fmtBytes(data.done)} of ${fmtBytes(data.total)}\n${data.file}`);
+        setStatus(`Copying your game files into this browser (one time, nothing is uploaded)\n${fmtBytes(data.done)} of ${fmtBytes(data.total)}\n${data.file}`);
       } else if (data.type === 'done') {
         progressEl.hidden = true;
         w.terminate();
         resolve();
       } else if (data.type === 'error') {
+        progressEl.hidden = true;
         w.terminate();
         reject(new Error(data.message));
       }
     };
-    w.postMessage({ manifestUrl: 'gamedata/manifest.json', baseUrl: 'gamedata/' });
+    w.postMessage(message);
   });
+}
+
+// Picks the files to copy from a list of { path, getFile } relative to the
+// chosen folder; accepts the install folder itself or its parent.
+function selectInstallFiles(entries) {
+  const lower = new Map(entries.map((e) => [e.path.toLowerCase(), e]));
+  let prefix = null;
+  for (const e of entries) {
+    const p = e.path.toLowerCase();
+    if (p.endsWith('data/always.dat') && p.split('/').length <= 3) { prefix = p.slice(0, -'data/always.dat'.length); break; }
+  }
+  if (prefix === null) {
+    if (lower.has('always.dat')) throw new Error('That looks like the Data folder. Please choose the folder that contains it (the game\'s install folder).');
+    throw new Error('No game files found there (looking for Data/always.dat). Please choose the game\'s install folder.');
+  }
+  const missing = REQUIRED_FILES.filter((f) => !lower.has(prefix + f));
+  if (missing.length) throw new Error('This install is missing ' + missing.join(', ') + '. A complete, patched (1.037) install is needed, for example the Steam version.');
+  const files = [];
+  for (const e of entries) {
+    const p = e.path.toLowerCase();
+    if (!p.startsWith(prefix)) continue;
+    const rel = e.path.slice(prefix.length);
+    if (rel.toLowerCase().startsWith('data/') || (!rel.includes('/') && ROOT_FILES.test(rel))) files.push({ path: rel, entry: e });
+  }
+  return files;
+}
+
+// Lists a picked directory (File System Access API). Below the chosen folder
+// only Data folders are walked in full, so unrelated big folders (editors,
+// redistributables, other games when a parent folder is chosen) stay cheap.
+async function listDirectory(handle, prefix = '', depth = 0, inData = false) {
+  const out = [];
+  for await (const [name, h] of handle.entries()) {
+    const path = prefix + name;
+    if (h.kind === 'file') {
+      out.push({ path, getFile: () => h.getFile() });
+      continue;
+    }
+    const isData = name.toLowerCase() === 'data';
+    if ((depth === 0 || isData || inData) && depth < 5) out.push(...(await listDirectory(h, path + '/', depth + 1, inData || isData)));
+  }
+  return out;
+}
+
+// Shows the folder chooser and resolves with the files to import.
+function chooseInstallFolder() {
+  return new Promise((resolve) => {
+    const box = $('choose');
+    const pickBtn = $('pick'), input = $('pickinput'), err = $('pickerror');
+    box.hidden = false;
+    const done = async (entries) => {
+      try {
+        const files = selectInstallFiles(entries);
+        box.hidden = true;
+        resolve(files);
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    };
+    pickBtn.onclick = async () => {
+      err.textContent = '';
+      if (window.showDirectoryPicker) {
+        try {
+          const dir = await window.showDirectoryPicker({ id: 'game-install', mode: 'read' });
+          setStatus('Reading the folder…');
+          await done(await listDirectory(dir));
+        } catch (e) {
+          if (e.name !== 'AbortError') err.textContent = e.message;
+        }
+      } else {
+        input.click();
+      }
+    };
+    input.onchange = () => {
+      const entries = [...input.files].map((f) => ({ path: f.webkitRelativePath.split('/').slice(1).join('/'), getFile: async () => f }));
+      done(entries);
+    };
+  });
+}
+
+async function importFromFolder() {
+  const files = await chooseInstallFolder();
+  const est = await navigator.storage.estimate?.();
+  const need = (await Promise.all(files.map(async (f) => (await f.entry.getFile()).size))).reduce((a, b) => a + b, 0);
+  if (est && est.quota && est.quota - (est.usage || 0) < need) throw new Error(`Not enough browser storage: the game needs ${fmtBytes(need)}, ${fmtBytes(est.quota - (est.usage || 0))} available.`);
+  const list = await Promise.all(files.map(async (f) => ({ path: f.path, file: await f.entry.getFile() })));
+  await runImport({ files: list, version: LOCAL_IMPORT_VERSION });
+}
+
+// "Forget game files": removes the copy from this browser's storage.
+async function forgetGameData() {
+  if (!confirm('Remove the game files copied into this browser? Saves and settings are removed too.')) return;
+  try { await (await navigator.storage.getDirectory()).removeEntry('renegade', { recursive: true }); } catch (e) {}
+  try { await (await navigator.storage.getDirectory()).removeEntry('persist', { recursive: true }); } catch (e) {}
+  location.reload();
 }
 
 /* ------------------------------------------------------------------- boot */
@@ -336,7 +494,22 @@ async function boot() {
     return;
   }
   try { await navigator.storage.persist?.(); } catch (e) {}
-  if (!(await haveGameData())) await importGameData();
+  const manifest = await serverManifest(); // self-hosting: the server offers its copy
+  for (;;) {
+    if (await haveGameData(manifest)) break;
+    try {
+      if (manifest) await runImport({ manifestUrl: 'gamedata/manifest.json', baseUrl: 'gamedata/' });
+      else {
+        setStatus('Choose your game folder to start.');
+        await importFromFolder();
+      }
+    } catch (e) {
+      setStatus('Import failed: ' + e.message);
+      if (manifest) return;
+    }
+  }
+  $('forget').hidden = false;
+  $('forget').onclick = (e) => { e.preventDefault(); forgetGameData(); };
   setStatus('Loading the engine…');
   const ready = new Promise((resolve) => { Module.onRuntimeInitialized = resolve; });
   await loadScript('renegade.js');

@@ -13,7 +13,7 @@ await page.goto('http://127.0.0.1:8461/');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
 // skip the intro movies as soon as they start
-const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 1000);
+const skipper = setInterval(() => page.evaluate(() => { if (window.rebelMovieActive) Module.rebelStopMovie(); }).catch(() => {}), 1000);
 while (!menuAt) await new Promise((r) => setTimeout(r, 1000));
 clearInterval(skipper);
 await new Promise((r) => setTimeout(r, 15000)); // let the menu settle

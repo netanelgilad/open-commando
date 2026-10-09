@@ -5,7 +5,8 @@
 //   /renegade.*      -> the Emscripten build output (js, wasm)
 //   /gamedata/...    -> the user's own Renegade install (imported into OPFS)
 //   /gamedata/manifest.json  generated listing of the files to import
-//   /movies/*.webm   -> transcoded cutscenes
+//   /bink.{js,wasm}  -> the page's cutscene decoder (tools/build-bink.sh)
+//   /movies/*.webm   -> transcoded cutscenes (optional fallback)
 //   /dbg/...         -> the same, with the debug build of renegade.*
 //
 // Sends COOP/COEP so the page is cross-origin isolated (SharedArrayBuffer
@@ -28,13 +29,14 @@ const cfg = {
   debugBuild: process.env.REBEL_DEBUG_BUILD_DIR || path.join(engine, 'build/wasm/bin'),
   game: process.env.REBEL_GAME_DIR || path.join(workspace, 'game-data/renegade'),
   movies: process.env.REBEL_MOVIES_DIR || path.join(workspace, 'web-movies'),
+  bink: process.env.REBEL_BINK_DIR || path.join(engine, 'build/bink'), // tools/build-bink.sh
 };
 
 // What the browser needs from the install (no executables, editors, redists).
 const IMPORT_DIRS = ['Data'];
-const IMPORT_EXCLUDE = [/^Data\/Movies\//i];
+const IMPORT_EXCLUDE = []; // cutscenes (Data/Movies/*.bik) are played in the page
 const IMPORT_ROOT_FILES = /\.(ttf|dat|ini|lcf|txt|016|256)$/i;
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2; // 2: includes Data/Movies
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -136,6 +138,8 @@ const server = createServer(async (req, res) => {
     } else if (p.startsWith('/movies/')) {
       file = inside(cfg.movies, p.slice('/movies/'.length));
       cache = 'public, max-age=86400';
+    } else if (/^\/bink\.(js|wasm)$/.test(p)) {
+      file = inside(cfg.bink, p.slice(1));
     } else if (/^\/renegade\.(js|wasm|worker\.js|data)$/.test(p)) {
       file = inside(debug ? cfg.debugBuild : cfg.build, p.slice(1));
     } else {

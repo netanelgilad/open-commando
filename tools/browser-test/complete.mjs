@@ -87,7 +87,7 @@ page.on("pageerror", (e) => { const l = `PAGEERROR ${e.message}\n${e.stack}`; li
 await page.goto((process.env.BASE || 'http://127.0.0.1:8461/') + '?nolock&quiet');
 await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
 await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
-const skipper = setInterval(() => page.evaluate(() => { if (document.getElementById('movie').style.display === 'block') Module.rebelStopMovie(); }).catch(() => {}), 500);
+const skipper = setInterval(() => page.evaluate(() => { if (window.rebelMovieActive) Module.rebelStopMovie(); }).catch(() => {}), 500);
 while (!menuAt) await new Promise((r) => setTimeout(r, 500));
 await page.waitForTimeout(5000);
 await audioLevel('main menu');
