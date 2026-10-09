@@ -42,8 +42,8 @@ advice: where the stakes are real, a lawyer should read the EA terms below.
 | Game data next to the repo | `game-data/`, `web-movies/` and the Steam download tools live outside `engine/` (the workspace root), so they are never in the git tree |
 | Test artifacts | `tools/browser-test/profile/` (a full OPFS copy of the game data!), `out/` (screenshots, profiles) and `node_modules/` are gitignored |
 | Personal info in tracked files | No home paths, hostnames or credentials (`git grep`) |
-| Personal info in history | (1) The `build` symlink (target a path on the developer's disk) was committed in f223aff; it is untracked now but still in history. (2) All our commits are authored `a work git identity` |
-| Credentials | Steam credentials only ever went through (secrets tool) at runtime; nothing in the repo or history |
+| Personal info in history | A local `build` symlink (pointing at a path on the developer's disk) and the commit identity; both fixed by a history rewrite before publication |
+| Credentials | Game-store credentials were only used at runtime by local tooling outside the repository; nothing in the repo or history |
 
 ## Separating the work from the assets
 
