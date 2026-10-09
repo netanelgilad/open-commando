@@ -137,6 +137,19 @@ await call('_Rebel_Audio_Stats');
 await shot('loaded');
 // Win and follow.
 await call('_Rebel_Debug_Win_Mission');
+if (step === 'score') {
+  // CPU profile of the score screen, then stop.
+  await page.waitForTimeout(15000);
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
+  await cdp.send('Profiler.start');
+  await page.waitForTimeout(6000);
+  const { profile } = await cdp.send('Profiler.stop');
+  writeFileSync(`${outDir}/score.cpuprofile`, JSON.stringify(profile));
+  await ctx.close();
+  process.exit(0);
+}
 for (let i = 0; i < 12; i++) { await page.waitForTimeout(10000); await call('_Rebel_Debug_Dump'); await shot(`won-${i}`); }
 await page.keyboard.press('Enter');
 await waitPlayable('next mission');

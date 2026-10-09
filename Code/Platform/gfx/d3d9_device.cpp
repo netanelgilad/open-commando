@@ -1180,39 +1180,84 @@ bool Device::Prepare_Draw(UINT base_bytes, GLuint vbo, UINT stride, DWORD fvf) {
   return true;
 }
 
+// Dynamic buffers (D3DUSAGE_DYNAMIC: WW3D's shared 5000-vertex / 5000-index
+// streaming buffers for text, UI, particles...) are never updated in place
+// on the GPU. The game rewrites parts of them between draws, and a partial
+// update of a buffer that queued draws still read makes ANGLE copy the whole
+// buffer. Instead each draw uploads just the range it uses into a scratch
+// buffer, replacing its storage (glBufferData), which never has to wait.
+UINT Device::Stream_Range(UINT first_byte, UINT bytes) {
+  const std::vector<uint8_t> &d = Stream->Data;
+  if (first_byte > d.size())
+    first_byte = (UINT)d.size();
+  bytes = std::min<UINT>(bytes, (UINT)d.size() - first_byte);
+  gls::Bind_Buffer(GL_ARRAY_BUFFER, ScratchVbo);
+  glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)std::max<UINT>(bytes, 4), d.data() + first_byte, GL_STREAM_DRAW);
+  Stat_Buffer_Bytes += bytes;
+  Stat_Buffer_Uploads++;
+  return bytes;
+}
+
 HRESULT Device::DrawPrimitive(D3DPRIMITIVETYPE type, UINT start, UINT count) {
   if (!Stream)
     return D3DERR_INVALIDCALL;
-  Stream->Upload();
   UINT stride = StreamStride ? StreamStride : Fvf_Layout(Fvf).stride;
-  if (!Prepare_Draw(StreamOffset, Stream->Gl, stride, Fvf))
-    return D3D_OK;
   GLsizei n;
   GLenum mode = Prim_Mode(type, count, n);
+  if (Stream->Usage & D3DUSAGE_DYNAMIC) {
+    Stream_Range(StreamOffset + start * stride, (UINT)n * stride);
+    if (!Prepare_Draw(0, ScratchVbo, stride, Fvf))
+      return D3D_OK;
+    Primitives += (unsigned)n;
+    glDrawArrays(mode, 0, n);
+    return D3D_OK;
+  }
+  Stream->Upload();
+  if (!Prepare_Draw(StreamOffset, Stream->Gl, stride, Fvf))
+    return D3D_OK;
   Primitives += (unsigned)n;
   glDrawArrays(mode, (GLint)start, n);
   return D3D_OK;
 }
 
-HRESULT Device::DrawIndexedPrimitive(D3DPRIMITIVETYPE type, INT base_vertex, UINT, UINT, UINT start_index,
-                                     UINT prim_count) {
+HRESULT Device::DrawIndexedPrimitive(D3DPRIMITIVETYPE type, INT base_vertex, UINT min_index, UINT num_vertices,
+                                     UINT start_index, UINT prim_count) {
   if (!Stream || !Indices)
     return D3DERR_INVALIDCALL;
-  Stream->Upload();
   UINT stride = StreamStride ? StreamStride : Fvf_Layout(Fvf).stride;
   // WebGL has no base-vertex draws: offset the attribute pointers instead.
   INT base = (INT)StreamOffset + base_vertex * (INT)stride;
   if (base < 0)
     return D3DERR_INVALIDCALL;
-  if (!Prepare_Draw((UINT)base, Stream->Gl, stride, Fvf))
-    return D3D_OK;
-  Indices->Upload(); // binds the element buffer into the VAO
   GLsizei n;
   GLenum mode = Prim_Mode(type, prim_count, n);
   bool i32 = Indices->Format == D3DFMT_INDEX32;
+  UINT isize = i32 ? 4u : 2u;
+  bool ok;
+  if (Stream->Usage & D3DUSAGE_DYNAMIC) {
+    // Vertices from the index space's vertex 0 (base) up to the last used one.
+    Stream_Range((UINT)base, (min_index + num_vertices) * stride);
+    ok = Prepare_Draw(0, ScratchVbo, stride, Fvf);
+  } else {
+    Stream->Upload();
+    ok = Prepare_Draw((UINT)base, Stream->Gl, stride, Fvf);
+  }
+  if (!ok)
+    return D3D_OK;
   Primitives += (unsigned)n;
-  glDrawElements(mode, n, i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
-                 (const void *)(uintptr_t)(start_index * (i32 ? 4u : 2u)));
+  if (Indices->Usage & D3DUSAGE_DYNAMIC) {
+    const std::vector<uint8_t> &d = Indices->Data;
+    size_t first = std::min<size_t>((size_t)start_index * isize, d.size());
+    size_t bytes = std::min<size_t>((size_t)n * isize, d.size() - first);
+    gls::Bind_Buffer(GL_ELEMENT_ARRAY_BUFFER, ScratchIbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)std::max<size_t>(bytes, 4), d.data() + first, GL_STREAM_DRAW);
+    Stat_Buffer_Bytes += bytes;
+    Stat_Buffer_Uploads++;
+    glDrawElements(mode, (GLsizei)(bytes / isize), i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT, nullptr);
+    return D3D_OK;
+  }
+  Indices->Upload(); // binds the element buffer into the VAO
+  glDrawElements(mode, n, i32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT, (const void *)(uintptr_t)(start_index * isize));
   return D3D_OK;
 }
 

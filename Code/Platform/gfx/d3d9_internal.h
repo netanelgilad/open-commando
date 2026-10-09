@@ -362,6 +362,7 @@ public:
 private:
   bool Create_Back_Buffer();
   void Destroy_Back_Buffer();
+  UINT Stream_Range(UINT first_byte, UINT bytes); // dynamic stream range -> ScratchVbo
   bool Prepare_Draw(UINT vertex_base_bytes, GLuint vbo, UINT stride, DWORD fvf);
   void Apply_Pipeline_State();
   void Apply_Samplers(FfpProgram *prog);

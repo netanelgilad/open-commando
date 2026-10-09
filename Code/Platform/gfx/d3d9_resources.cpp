@@ -378,6 +378,10 @@ HRESULT VertexBuffer::GetDesc(D3DVERTEXBUFFER_DESC *desc) {
 }
 
 void VertexBuffer::Upload() {
+  if (Usage & D3DUSAGE_DYNAMIC) { // drawn from the CPU copy, see Device::Stream_Range
+    DirtyBegin = DirtyEnd = 0;
+    return;
+  }
   if (DirtyEnd <= DirtyBegin)
     return;
   gls::Bind_Buffer(GL_ARRAY_BUFFER, Gl);
@@ -450,6 +454,10 @@ HRESULT IndexBuffer::GetDesc(D3DINDEXBUFFER_DESC *desc) {
 
 // The element binding belongs to the bound VAO; the device rebinds before draws.
 void IndexBuffer::Upload() {
+  if (Usage & D3DUSAGE_DYNAMIC) { // drawn from the CPU copy, see Device::DrawIndexedPrimitive
+    DirtyBegin = DirtyEnd = 0;
+    return;
+  }
   gls::Bind_Buffer(GL_ELEMENT_ARRAY_BUFFER, Gl);
   if (GlSize != Data.size()) {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)Data.size(), Data.data(),

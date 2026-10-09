@@ -371,6 +371,7 @@ if(REBEL_PORTABLE)
         "$<IF:$<CONFIG:Debug>,-sASSERTIONS=1,-sASSERTIONS=0>"
         "$<$<CONFIG:Debug>:-sSTACK_OVERFLOW_CHECK=2>"
         "$<$<NOT:$<CONFIG:Debug>>:-O3>"
+        "$<$<NOT:$<CONFIG:Debug>>:--profiling-funcs>" # keep function names for profiles
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=268435456
         -sMAXIMUM_MEMORY=4294967296
