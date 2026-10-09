@@ -47,6 +47,57 @@ static void Store_Resolution(int w, int h) {
 }
 extern "C" void Rebel_Set_Command_Line(const char *cmd);
 
+#include "wwprofile.h"
+#include <unistd.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/console.h>
+#endif
+
+extern "C" volatile unsigned Rebel_Heartbeat;
+extern "C" const char *volatile Rebel_Phase;
+
+// Hang watchdog: if the main thread neither yields a frame nor pumps messages
+// for 10 s, report where it is (the engine's WWPROFILE scope chain, read
+// racily) from this thread, which keeps running while the main thread is
+// stuck. Reports again every 30 s while the stall lasts.
+static void Hang_Watchdog() {
+  unsigned last = Rebel_Heartbeat;
+  double since = emscripten_get_now(); // when the heartbeat last changed
+  double next_report = 10000.0;        // ms of stall before the (next) report
+  for (;;) {
+    sleep(1); // may oversleep on throttled machines: time is measured below
+    unsigned now = Rebel_Heartbeat;
+    double stalled = emscripten_get_now() - since;
+    if (now != last) {
+      if (next_report > 10000.0)
+        emscripten_console_errorf("[hang] main thread resumed after %.0f s", stalled / 1000.0);
+      last = now;
+      since = emscripten_get_now();
+      next_report = 10000.0;
+      continue;
+    }
+    if (stalled >= next_report) {
+      next_report = stalled + 30000.0;
+      char chain[1024] = "";
+      size_t len = 0;
+      const WWProfileHierachyNodeClass *n = WWProfileManager::Peek_Current_Node();
+      for (int depth = 0; n && depth < 40; depth++, n = n->Get_Parent()) {
+        const char *name = n->Get_Name() ? n->Get_Name() : "?";
+        int w = snprintf(chain + len, sizeof(chain) - len, "%s%s", depth ? " <- " : "", name);
+        if (w < 0 || (size_t)w >= sizeof(chain) - len)
+          break;
+        len += (size_t)w;
+      }
+      // Printed from this thread directly: stderr from threads is relayed
+      // through the main thread, which is the one that's stuck.
+      char line[1300];
+      snprintf(line, sizeof(line), "[hang] main thread stuck for %.0f s; last step: %s; scopes: %s", stalled / 1000.0,
+               Rebel_Phase, chain);
+      emscripten_console_error(line);
+    }
+  }
+}
+
 int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
   // The OPFS backend spawns its own proxy worker, which may not be started
@@ -91,6 +142,10 @@ int main(int argc, char **argv) {
     cmd += argv[i];
   }
   Rebel_Set_Command_Line(cmd.c_str());
+#ifdef __EMSCRIPTEN__
+  WWProfileManager::Track_Scopes_Only(); // main thread scope chain for the watchdog
+  std::thread(Hang_Watchdog).detach();
+#endif
   std::string args = cmd.size() > 8 ? cmd.substr(9) : std::string();
   fprintf(stderr, "[rebel] starting Renegade in %s: %s\n", game_dir, cmd.c_str());
   return WinMain((HINSTANCE)GetModuleHandleA(nullptr), nullptr, (LPSTR)args.c_str(), SW_SHOW);

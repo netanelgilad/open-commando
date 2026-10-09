@@ -231,7 +231,14 @@ extern "C" double Rebel_Stat_Audio_Ms = 0; // reported with the frame stats (d3d
 
 extern "C" void Rebel_Registry_Flush(void);
 
+// Main-thread progress for the hang watchdog (main_web.cpp): bumped at every
+// frame yield and message pump; Rebel_Phase names the last platform step.
+extern "C" volatile unsigned Rebel_Heartbeat = 0;
+extern "C" const char *volatile Rebel_Phase = "start";
+
 extern "C" void Rebel_Frame_Yield(void) {
+  Rebel_Heartbeat++;
+  Rebel_Phase = "frame yield";
 #ifdef __EMSCRIPTEN__
   Rebel_Registry_Flush(); // settings changed this frame (win32_registry.cpp)
   double t = emscripten_get_now();
@@ -240,6 +247,7 @@ extern "C" void Rebel_Frame_Yield(void) {
   if (emscripten_has_asyncify() && emscripten_is_main_browser_thread())
     Rebel_JS_Wait_Frame();
 #endif
+  Rebel_Phase = "game frame";
 }
 
 // Called from the main loop's message pump (PeekMessage): a point on the

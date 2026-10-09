@@ -17,7 +17,7 @@ page.on('console', (m) => {
   const t = m.text();
   if (/MainMenuDialogClass: started/.test(t)) menuAt = Date.now();
   if (/\[debug\] star at/.test(t)) starSeen = true;
-  if (/\[debug\]|DirectInput|Input::|\[d3d9\] frame|abort|debug break|damag|Assert|PAGEERROR|RuntimeError/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
+  if (/\[debug\]|\[hang\]|DirectInput|Input::|\[d3d9\] frame|abort|debug break|damag|Assert|PAGEERROR|RuntimeError/.test(t)) console.log(`${stamp()} ${t}`.slice(0, 240));
   lines.push(`${stamp()} ${t}`);
 });
 // Hang watchdog: a CPU profile runs from the campaign start; if the page logs

@@ -244,9 +244,14 @@ void WWProfileHierachyNodeClass::Reset() {
  * HISTORY:                                                                                    *
  *   9/24/2000  gth : Created.                                                                 *
  *=============================================================================================*/
+// Scope tracking without timing (WWProfileManager::Track_Scopes_Only): the
+// browser build's hang watchdog only needs the current scope chain, and each
+// tick read there is a call out to JavaScript.
+static bool TimingEnabled = true;
+
 void WWProfileHierachyNodeClass::Call() {
   TotalCalls++;
-  if (RecursionCounter++ == 0) {
+  if (RecursionCounter++ == 0 && TimingEnabled) {
     WWProfile_Get_Ticks(&StartTime);
   }
 }
@@ -265,7 +270,7 @@ void WWProfileHierachyNodeClass::Call() {
  *=============================================================================================*/
 bool WWProfileHierachyNodeClass::Return() {
   if (--RecursionCounter == 0) {
-    if (TotalCalls != 0) {
+    if (TotalCalls != 0 && TimingEnabled) {
       int64_t time;
       WWProfile_Get_Ticks(&time);
       time -= StartTime;
@@ -383,6 +388,11 @@ void WWProfileManager::Stop_Root_Profile() {
  * HISTORY:                                                                                    *
  *   9/24/2000  gth : Created.                                                                 *
  *=============================================================================================*/
+void WWProfileManager::Track_Scopes_Only() {
+  TimingEnabled = false;
+  Reset();
+}
+
 void WWProfileManager::Reset() {
   ThreadID = ::GetCurrentThreadId();
 

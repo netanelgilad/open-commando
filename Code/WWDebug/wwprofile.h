@@ -44,8 +44,10 @@
 #include "wwstring.h"
 
 
-// enable profiling by default in debug mode.
-#ifdef WWDEBUG
+// enable profiling by default in debug mode. The browser build always keeps
+// the scopes: its hang watchdog reports the main thread's scope chain (scope
+// tracking only, see WWProfileManager::Track_Scopes_Only).
+#if defined(WWDEBUG) || defined(REBEL_PORTABLE)
 #define ENABLE_WWPROFILE
 #endif
 
@@ -159,6 +161,7 @@ public:
   static void Stop_Root_Profile();
 
   static void Reset();
+  static void Track_Scopes_Only(); // Reset() on this thread, recording scopes but not times
   static void Increment_Frame_Counter();
   static int Get_Frame_Count_Since_Reset() { return FrameCounter; }
   static float Get_Time_Since_Reset();
@@ -169,6 +172,9 @@ public:
   static void Release_In_Order_Iterator(WWProfileInOrderIterator *iterator);
 
   static WWProfileHierachyNodeClass *Get_Root() { return &Root; }
+  // Innermost profile scope of the profiled (main) thread. Read racily by the
+  // browser build's hang watchdog to report where the main thread is stuck.
+  static WWProfileHierachyNodeClass *Peek_Current_Node() { return CurrentNode; }
 
   static void Begin_Collecting();
   static void End_Collecting(const char *filename);

@@ -368,7 +368,10 @@ static void Maybe_Yield_To_Browser() {
 
 extern "C" void Rebel_After_Frame(void);
 
+extern "C" volatile unsigned Rebel_Heartbeat;
+
 extern "C" BOOL PeekMessageA(LPMSG msg, HWND w, UINT min, UINT max, UINT remove) {
+  Rebel_Heartbeat++;
   static bool running_actions = false;
   if (!running_actions) {
     running_actions = true;

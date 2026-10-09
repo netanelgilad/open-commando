@@ -4,6 +4,8 @@
 #include "dialogbase.h"
 
 #include <cstdio>
+#include <emscripten.h>
+#include "wwprofile.h"
 
 static bool PendingDump = false;
 extern "C" void Rebel_Debug_Dump(void) { PendingDump = true; } // queued, see Rebel_Run_Pending_Actions
@@ -59,6 +61,9 @@ extern "C" void Rebel_Debug_Save(void) { PendingSave = 1; }
 extern "C" void Rebel_Debug_Load(void) { PendingLoad = 1; }
 extern "C" void Rebel_Debug_Win_Mission(void) { PendingWin = 1; }
 static int PendingEva = -1;
+// Test hook for the hang watchdog: busy-waits the main thread (seconds).
+static int PendingStall = 0;
+extern "C" void Rebel_Debug_Stall(int seconds) { PendingStall = seconds; }
 // Test hooks for walking the menus: list the active dialog's controls, and
 // press a control (as a click on it would, through On_Command).
 static int PendingCommand = 0;
@@ -102,6 +107,15 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
     PendingEva = -1;
     fprintf(stderr, "[debug] opening EVA tab %d\n", tab);
     EVAEncyclopediaMenuClass::Display((EVAEncyclopediaMenuClass::TAB_ID)tab);
+  }
+  if (PendingStall > 0) {
+    int secs = PendingStall;
+    PendingStall = 0;
+    WWPROFILE("Rebel_Debug_Stall");
+    fprintf(stderr, "[debug] stalling the main thread for %d s\n", secs);
+    double until = emscripten_get_now() + secs * 1000.0;
+    while (emscripten_get_now() < until) {
+    }
   }
   if (PendingList) {
     PendingList = false;
