@@ -20,7 +20,14 @@
 // (little-endian fields). A hub rewrites srcIp with the sender's assigned
 // address, so endpoints can't spoof each other. Control messages travel as
 // JSON text: the hub's {"type":"hello","address":"10.x.y.z"} assigns the
-// endpoint its address.
+// endpoint its address, and {"type":"signal","to"|"from":ip,...} carries
+// WebRTC negotiation between two endpoints.
+//
+// Direct peers (WebRTC): an endpoint can open an unreliable, unordered data
+// channel (maxRetransmits 0: UDP-like, a lost frame doesn't hold up the
+// next) to another endpoint, negotiated through the hub. Frames to that
+// peer then go over the channel; everything else still goes through the
+// hub. The game sees no difference.
 'use strict';
 
 const RebelNet = (() => {
@@ -86,6 +93,7 @@ const RebelNet = (() => {
         if (typeof e.data === 'string') {
           const m = JSON.parse(e.data);
           if (m.type === 'hello') { hello = true; resolve(m.address); }
+          else if (t.onControl) t.onControl(m);
           return;
         }
         onFrame(new Uint8Array(e.data));
@@ -94,6 +102,7 @@ const RebelNet = (() => {
       ws.onclose = () => { if (hello) onClose(); };
     });
     t.send = (frame) => { if (ws.readyState === 1) ws.send(frame); };
+    t.sendControl = (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
     t.close = () => ws && ws.close();
     return t;
   }
@@ -159,12 +168,27 @@ const RebelNet = (() => {
       impair(() => deliver(d));
     };
 
+    // Direct peers: ip -> open RTCDataChannel.
+    const peers = new Map();
+    const sendFrame = (toIp, frame) => {
+      const dc = peers.get(toIp);
+      if (dc && dc.readyState === 'open') dc.send(frame);
+      else net.transport.send(frame);
+    };
+    // A frame from a direct peer: stamp its address, as the hub would.
+    const fromPeer = (ip, data) => {
+      const frame = new Uint8Array(data);
+      if (frame.length < HEADER) return;
+      new DataView(frame.buffer, frame.byteOffset, frame.byteLength).setUint32(7, ip, true);
+      onFrame(frame);
+    };
+
     net.send = (toIp, toPort, fromPort, data) => {
       if (!net.address) return;
       net.stats.sentPackets++;
       net.stats.sentBytes += data.length;
       const frame = encode(toIp, toPort, net.address, fromPort, data);
-      impair(() => net.transport.send(frame));
+      impair(() => sendFrame(toIp, frame));
       // Broadcasts reach this endpoint too, as on a real LAN.
       if (toIp === BROADCAST) deliver({ fromIp: net.address, fromPort, toPort, data });
     };
@@ -176,7 +200,80 @@ const RebelNet = (() => {
       net.log(`${net.transport.name}: this endpoint is ${address}`);
       return address;
     });
-    net.close = () => net.transport.close();
+    // WebRTC. `rtc` = { iceServers, connectTo: ip, accept: bool }: connectTo
+    // opens a data channel to that endpoint (a client to its match server);
+    // accept answers other endpoints' offers (the server). Needs
+    // RTCPeerConnection (browsers; node-datachannel's polyfill in Node).
+    const rtc = net.rtc = { config: null, connections: new Map(), state: {} };
+    const pcFor = (ip) => {
+      let pc = rtc.connections.get(ip);
+      if (pc) return pc;
+      pc = new RTCPeerConnection({ iceServers: rtc.config.iceServers || [] });
+      rtc.connections.set(ip, pc);
+      const peer = ipToString(ip);
+      pc.onicecandidate = (e) => {
+        if (e.candidate) net.transport.sendControl({ type: 'signal', to: peer, candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate });
+      };
+      pc.onconnectionstatechange = () => {
+        rtc.state[peer] = pc.connectionState;
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+          peers.delete(ip);
+          rtc.connections.delete(ip);
+          net.log(`rtc ${peer}: ${pc.connectionState}, back to the hub`);
+        }
+      };
+      return pc;
+    };
+    const useChannel = (ip, dc) => {
+      dc.binaryType = 'arraybuffer';
+      dc.onopen = () => {
+        if (peers.get(ip) === dc) return;
+        peers.set(ip, dc);
+        net.log(`rtc ${ipToString(ip)}: data channel open (unreliable, unordered)`);
+      };
+      dc.onclose = () => peers.delete(ip);
+      dc.onmessage = (e) => fromPeer(ip, e.data);
+      if (dc.readyState === 'open') dc.onopen();
+    };
+    const onControl = async (m) => {
+      if (m.type !== 'signal' || !rtc.config) return;
+      const ip = ipFromString(m.from);
+      try {
+        if (m.description) {
+          if (m.description.type === 'offer' && !rtc.config.accept) return;
+          const pc = pcFor(ip);
+          if (m.description.type === 'offer') pc.ondatachannel = (e) => useChannel(ip, e.channel);
+          await pc.setRemoteDescription(m.description);
+          if (m.description.type === 'offer') {
+            await pc.setLocalDescription(await pc.createAnswer());
+            net.transport.sendControl({ type: 'signal', to: m.from, description: pc.localDescription.toJSON ? pc.localDescription.toJSON() : { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+          }
+        } else if (m.candidate) {
+          const pc = rtc.connections.get(ip);
+          if (pc) await pc.addIceCandidate(m.candidate);
+        }
+      } catch (e) {
+        net.log(`rtc ${m.from}: ${e.message}`);
+      }
+    };
+    net.enableRtc = async (config) => {
+      rtc.config = config;
+      net.transport.onControl = onControl;
+      if (config.connectTo) {
+        await net.ready;
+        const ip = ipFromString(config.connectTo);
+        const pc = pcFor(ip);
+        useChannel(ip, pc.createDataChannel('dgram', { ordered: false, maxRetransmits: 0 }));
+        await pc.setLocalDescription(await pc.createOffer());
+        net.transport.sendControl({ type: 'signal', to: config.connectTo, description: pc.localDescription.toJSON ? pc.localDescription.toJSON() : { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+      }
+    };
+    net.directPeers = () => [...peers.keys()].map(ipToString);
+
+    net.close = () => {
+      for (const pc of rtc.connections.values()) pc.close();
+      net.transport.close();
+    };
     return net;
   }
 

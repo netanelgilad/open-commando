@@ -8,6 +8,7 @@
 //
 //   BASE=http://127.0.0.1:8461/dbg/ node lan.mjs
 //   NETLAG=100 NETLOSS=0.05 ...       simulate a worse connection
+//   NETRTC=1 ...                      clients reach the server over a WebRTC data channel
 //   JOIN=connect ...                  clients join with +connect 10.0.0.1:4848 (the way
 //                                     matchmaking will) instead of the LAN game list
 //   SERVER=node ...                   the host is the headless dedicated server
@@ -20,7 +21,7 @@ const outDir = new URL('./out/', import.meta.url).pathname;
 mkdirSync(outDir, { recursive: true });
 const base = process.env.BASE || 'http://127.0.0.1:8461/';
 const net = process.env.NET || 'ws://127.0.0.1:8787/room/lan-test-' + Date.now();
-const extra = ['netlag', 'netjitter', 'netloss'].filter((k) => process.env[k.toUpperCase()]).map((k) => `&${k}=${process.env[k.toUpperCase()]}`).join('');
+const extra = (process.env.NETRTC ? '&netrtc' : '') + ['netlag', 'netjitter', 'netloss'].filter((k) => process.env[k.toUpperCase()]).map((k) => `&${k}=${process.env[k.toUpperCase()]}`).join('');
 // The client profile gets the game files from the local server on first use.
 const contexts = [];
 const browserFor = async (profile) => {

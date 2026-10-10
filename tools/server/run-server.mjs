@@ -106,6 +106,13 @@ const require = createRequire(import.meta.url);
 const RebelNet = require(join(engine, 'web/net.js'));
 // The match server takes the room's fixed address (10.0.0.1, see the hub).
 const net = RebelNet.create(opt.net + (opt.net.includes('?') ? '&' : '?') + 'role=server');
+// Clients may open WebRTC data channels to the server (web/net.js, ?netrtc).
+try {
+  globalThis.RTCPeerConnection = require('node-datachannel/polyfill').RTCPeerConnection;
+  net.enableRtc({ accept: true, iceServers: process.env.REBEL_ICE_SERVERS ? JSON.parse(process.env.REBEL_ICE_SERVERS) : [] });
+} catch (e) {
+  console.log(`[net] no WebRTC (${e.message}): clients stay on the hub`);
+}
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
 net.log = (t) => console.log(`${stamp()} [net] ${t}`);

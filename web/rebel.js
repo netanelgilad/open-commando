@@ -136,6 +136,14 @@ if (params.get('net')) {
     });
     Module.rebelNet.log = (t) => log('[net] ' + t);
     Module.rebelNet.ready.catch((e) => log('[net] ' + e.message));
+    // ?netrtc: game traffic to the match server (10.0.0.1) over an
+    // unreliable WebRTC data channel instead of the hub's WebSocket.
+    // ?netrtc=<json ice servers> for TURN.
+    if (params.has('netrtc')) {
+      const ice = params.get('netrtc');
+      Module.rebelNet.enableRtc({ connectTo: '10.0.0.1', iceServers: ice ? JSON.parse(ice) : [] })
+        .catch((e) => log('[net] rtc: ' + e.message));
+    }
     // Round trips through the transport (and this page's event loop, which
     // the game shares), logged every 10 s.
     setInterval(() => Module.rebelNet.probe(), 200);

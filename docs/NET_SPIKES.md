@@ -162,3 +162,78 @@ the menus (the engine's GameSpy-launch path: `cGameSpyAdmin` ->
 `Connect_To_Game_Server`), loads the map and spawns. The bandwidth test that
 path runs first fails harmlessly (no raw sockets) and falls back to a
 default. Test: `JOIN=connect SERVER=node node lan.mjs`.
+
+## Architecture so far (from S1-S4)
+
+```
+ browser (game page)                       Cloudflare
+ ------------------                        ----------
+ engine netcode (unchanged)
+   | UDP socket calls
+ vnet.cpp  (virtual datagram sockets)
+   | frames {dst, src, payload}
+ net.js  -- transport --------------->  Worker (nearest PoP)
+           (WebSocket today;                 |
+            WebRTC/WebTransport later)       v
+                                         Match Durable Object  = the room's hub:
+                                           addresses, routing, auth, slots
+                                             |  one WebSocket (containerFetch)
+                                             v
+                                         Container: Node + the same renegade.wasm,
+                                           STARTSERVER + NODX, server = 10.0.0.1,
+                                           console on stdin (admin, game_info)
+```
+
+- **One engine everywhere.** The match server is the browser build run
+  headless; protocol, data and version always match the clients (the exe
+  key enforces it).
+- **The Match DO is both the container's owner and the room's hub.**
+  Players' WebSockets end at the DO, which forwards frames for 10.0.0.1 to
+  the container over a single WebSocket and the container's frames to the
+  players. The container needs no public endpoint, and the DO already knows
+  who is connected (slots, backfill, kicking a player = closing a socket).
+  (Spikes used the reverse, the server dialing out to the hub; both work
+  with the same frames.)
+- **Joining is a URL:** matchmaking returns a room; the page opens with
+  `net=<room>` and `+connect 10.0.0.1:4848 +netplayername <name>`.
+- **Transport is swappable per player:** the DO can accept a WebRTC data
+  channel (through Cloudflare TURN) or, later, WebTransport for the same
+  room; the engine and server don't change.
+
+Next spikes:
+- **S5:** the hub on real Cloudflare: round trips from here to a deployed
+  Durable Object, steady and under load.
+- **S6:** the server in a Cloudflare Container: image, cold start, CPU and
+  memory per match, the DO <-> container WebSocket. Needs a decision on the
+  game data in a private image (ONLINE_PLAN O6) and a Docker that can build
+  linux/amd64.
+- **S7:** an unreliable transport: browser WebRTC data channel
+  (`maxRetransmits: 0`) through Cloudflare TURN to the server (TURN over
+  TLS on 443 works from containers), vs. WebSocket under packet loss
+  (`?netloss=`).
+- **S8:** the matchmaker Durable Object (tickets, ping windows, backfill),
+  against simulated players.
+
+## S7a: WebRTC data channel transport (local)
+
+Question: can the game's datagrams to the match server go over an
+unreliable, unordered WebRTC data channel, negotiated through the hub,
+without the engine knowing?
+
+**Yes.** `web/net.js` keeps a table of direct peers: frames to a peer with
+an open data channel (`ordered: false, maxRetransmits: 0`) go over it,
+everything else through the hub. Negotiation is JSON control messages
+(`{"type":"signal","to":ip,...}`) the hub forwards with the sender stamped.
+The server side is the same net.js on node-datachannel's `RTCPeerConnection`
+polyfill (libdatachannel). Page: `?netrtc` (or `?netrtc=<ice servers JSON>`
+for TURN); server: on by default (`REBEL_ICE_SERVERS`).
+
+- Two clients joined the Node server with `+connect`, channels opened in
+  under a second, both spawned and walked (`NETRTC=1 JOIN=connect
+  SERVER=node node lan.mjs`). Server 86 MB resident with libdatachannel.
+- Round trip Node <-> Node over the channel on localhost: median 3.0 ms, p99
+  5.9 ms (`tools/server/rtc-test.mjs`), vs ~0.8 ms through the WebSocket
+  hub: SCTP/DTLS cost, negligible next to internet latency.
+- Still to measure on a real network: loss behaviour (WebSocket stalls a
+  ~RTT on a lost packet; the channel just drops it, which the engine's own
+  reliability layer handles) and TURN-relayed paths from a container.

@@ -13,6 +13,10 @@ const KIND_DATAGRAM = 1;
 const HEADER = 13;
 const BROADCAST = 0xffffffff;
 const ipToString = (ip) => [ip & 255, (ip >>> 8) & 255, (ip >>> 16) & 255, ip >>> 24].join('.');
+const ipFromString = (s) => {
+  const p = s.split('.').map(Number);
+  return (p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)) >>> 0;
+};
 const addressFor = (n) => (10 | ((n >> 8) << 16) | ((n & 255) << 24)) >>> 0; // 10.0.x.y
 
 const rooms = new Map(); // name -> Map(address -> ws)
@@ -32,7 +36,18 @@ wss.on('connection', (ws, req) => {
   room.set(ip, ws);
   ws.send(JSON.stringify({ type: 'hello', address: ipToString(ip) }));
   ws.on('message', (data, isBinary) => {
-    if (!isBinary || data.length < HEADER || data[0] !== KIND_DATAGRAM) return;
+    if (!isBinary) {
+      // WebRTC signalling between endpoints, forwarded with the sender stamped.
+      let m;
+      try { m = JSON.parse(data.toString()); } catch { return; }
+      if (m.type !== 'signal' || typeof m.to !== 'string') return;
+      const peer = room.get(ipFromString(m.to));
+      if (!peer) return;
+      m.from = ipToString(ip);
+      delete m.to;
+      return peer.send(JSON.stringify(m));
+    }
+    if (data.length < HEADER || data[0] !== KIND_DATAGRAM) return;
     data.writeUInt32LE(ip, 7);
     const to = data.readUInt32LE(1);
     if (to === BROADCAST) {

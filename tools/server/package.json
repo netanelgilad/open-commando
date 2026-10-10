@@ -1,1 +1,1 @@
-{ "name": "rebel-server", "private": true, "type": "module", "dependencies": { "ws": "^8" } }
+{"name":"rebel-server","private":true,"type":"module","dependencies":{"node-datachannel":"^0.33.4","ws":"^8"}}

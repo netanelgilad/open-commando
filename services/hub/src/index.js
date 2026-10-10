@@ -16,6 +16,10 @@ const HEADER = 13;
 const BROADCAST = 0xffffffff;
 
 const ipToString = (ip) => [ip & 255, (ip >>> 8) & 255, (ip >>> 16) & 255, ip >>> 24].join('.');
+const ipFromString = (s) => {
+  const p = s.split('.').map(Number);
+  return (p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)) >>> 0;
+};
 const addressFor = (n) => (10 | (0 << 8) | ((n >> 8) << 16) | ((n & 255) << 24)) >>> 0; // 10.0.x.y
 
 export class Room extends DurableObject {
@@ -45,7 +49,7 @@ export class Room extends DurableObject {
   }
 
   webSocketMessage(ws, message) {
-    if (typeof message === 'string') return; // no control messages from endpoints yet
+    if (typeof message === 'string') return this.control(ws, message);
     const frame = new Uint8Array(message);
     if (frame.length < HEADER || frame[0] !== KIND_DATAGRAM) return;
     const v = new DataView(message);
@@ -58,6 +62,23 @@ export class Room extends DurableObject {
       const peer = this.byAddress.get(to);
       if (peer) this.trySend(peer, message);
     }
+  }
+
+  // Control messages between endpoints: WebRTC signalling
+  // ({"type":"signal","to":ip,...}), forwarded with the sender stamped.
+  control(ws, text) {
+    let m;
+    try {
+      m = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (m.type !== 'signal' || typeof m.to !== 'string' || text.length > 16384) return;
+    const peer = this.byAddress.get(ipFromString(m.to));
+    if (!peer) return;
+    m.from = ipToString(ws.deserializeAttachment().ip);
+    delete m.to;
+    this.trySend(peer, JSON.stringify(m));
   }
 
   trySend(ws, message) {
