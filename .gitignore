@@ -77,3 +77,4 @@ tools/browser-test/out/
 # Wrangler local state and per-service dependencies
 .wrangler/
 services/*/node_modules/
+tools/*/node_modules/

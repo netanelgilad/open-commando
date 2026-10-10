@@ -52,8 +52,25 @@ async function player(name, profile) {
     else if (NETWORK.test(t) && !/\[debug\]   ctl/.test(t)) console.log(`${stamp()} ${name}: ${t}`.slice(0, 260));
   });
   page.on("pageerror", (e) => { p.crashed = true; console.log(`${stamp()} ${name}: PAGEERROR ${e.message}\n${e.stack}`); });
-  await page.goto(`${base}?nolock&quiet&noguard&name=${p.nick}&net=${encodeURIComponent(net)}${extra}`);
+  // CLIENT_BASE: the first client from another build (e.g. /dbg/ for its logs).
+  const from = name === 'client' && process.env.CLIENT_BASE ? process.env.CLIENT_BASE : base;
+  await page.goto(`${from}?nolock${from === base ? '&quiet' : ''}&noguard&name=${p.nick}&net=${encodeURIComponent(net)}${extra}`);
   await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
+  // HOST_PLAYS=1: the page host also plays (the install's default host
+  // settings, Data/svrcfg_cnc.ini, say IsDedicated=yes). Edits this
+  // profile's own copy of the file.
+  if (name === 'host' && process.env.HOST_PLAYS) {
+    console.log(await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      const data = await (await root.getDirectoryHandle('renegade')).getDirectoryHandle('Data');
+      const fh = await data.getFileHandle('svrcfg_cnc.ini');
+      const text = await (await fh.getFile()).text();
+      const w = await fh.createWritable();
+      await w.write(text.replace(/IsDedicated=yes/i, 'IsDedicated=no'));
+      await w.close();
+      return 'host: IsDedicated=no';
+    }));
+  }
   await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
   p.skipper = setInterval(() => page.evaluate(() => { if (window.rebelMovieActive) Module.rebelStopMovie(); }).catch(() => {}), 500);
   while (!p.menuAt) {
@@ -111,8 +128,8 @@ async function nodeServer() {
   proc.stderr.on('data', onData);
   p.proc = proc;
   p.page = { screenshot: async () => {} };
-  for (let i = 0; i < 120 && !ready; i++) await new Promise((r) => setTimeout(r, 1000));
-  if (!ready) throw new Error('server did not start');
+  for (let i = 0; i < 300 && !ready; i++) await new Promise((r) => setTimeout(r, 1000));
+  if (!ready) throw new Error('server did not start: ' + p.lines.slice(-3).join(' | '));
   return p;
 }
 const players = [];
@@ -160,12 +177,16 @@ try {
     clients.push(c);
     await join(c);
   }
+  // SERVER_CMDS="a;b": console commands for the Node server once everyone joined.
+  if (host.proc && process.env.SERVER_CMDS) host.proc.stdin.write(process.env.SERVER_CMDS.split(';').join('\n') + '\n');
   for (let i = 0; i < 36 && clients.some((c) => !c.star); i++) {
     await clients[0].page.waitForTimeout(5000);
     for (const c of clients) await dump(c);
     if (host.proc && i % 4 === 0) host.proc.stdin.write('game_info\nplayer_info\n');
   }
-  // Walk forward a little and check the soldier moved.
+  // Let textures and the spawn settle, then walk forward a little and check
+  // the soldier moved.
+  if (clients.every((c) => c.star)) await clients[0].page.waitForTimeout(20000);
   for (const c of clients.filter((x) => x.star)) {
     const before = c.star;
     await c.page.mouse.click(512, 384);

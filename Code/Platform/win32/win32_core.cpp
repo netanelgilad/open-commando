@@ -119,15 +119,28 @@ static unsigned long long Now_Micros() {
   using namespace std::chrono;
   return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
-static const unsigned long long BootMicros = Now_Micros();
+// Milliseconds since the first call, like Windows' time since boot. Set on
+// first use: engine statics read the clock during static initialization
+// (SysTimeClass), before a global here would be initialized, and a start time
+// taken from the raw clock then made every later reading "wrap" to ~2^32.
+// The engine compares times as signed ints, which also assumes the count
+// stays below 2^31 ms (24.8 days), as on Windows.
+static unsigned long long Boot_Micros() {
+  static const unsigned long long boot = Now_Micros();
+  return boot;
+}
 
-extern "C" DWORD GetTickCount(void) { return (DWORD)((Now_Micros() - BootMicros) / 1000ULL); }
+extern "C" DWORD GetTickCount(void) {
+  unsigned long long boot = Boot_Micros();
+  return (DWORD)((Now_Micros() - boot) / 1000ULL);
+}
 extern "C" DWORD timeGetTime(void) { return GetTickCount(); }
 extern "C" UINT timeBeginPeriod(UINT) { return 0; }
 extern "C" UINT timeEndPeriod(UINT) { return 0; }
 
 extern "C" BOOL QueryPerformanceCounter(LARGE_INTEGER *count) {
-  count->QuadPart = (LONGLONG)(Now_Micros() - BootMicros);
+  unsigned long long boot = Boot_Micros();
+  count->QuadPart = (LONGLONG)(Now_Micros() - boot);
   return TRUE;
 }
 
