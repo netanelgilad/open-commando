@@ -68,6 +68,12 @@ Game List, and the client joins.
     nickname-collision check fired correctly when both were "BROWSER".
   - Two debug builds on this Mac mini run at 0-3 fps; use release builds
     for multiplayer tests.
+- **Version lock:** clients and server must be the same build. The exe key
+  (`cNetwork::Compute_Exe_Key`) is the build's git hash plus a CRC of the
+  data files; a mismatch shows as "Exe version mismatch" in the game list
+  and the server ignores the join. So deploys must ship the page and the
+  server image together, and the matchmaker must only pair players with
+  servers of their build (keep old servers until their matches end).
 - **Engine features found that the product needs, already in the code:**
   - `+connect <ip>:<port>` and `+netplayername <name>` on the command line
     (GameSpy-era direct join: `cGameSpyAdmin::Connect_To_Game_Server`, a

@@ -9,7 +9,8 @@
 //   BASE=http://127.0.0.1:8461/dbg/ node lan.mjs
 //   NETLAG=100 NETLOSS=0.05 ...       simulate a worse connection
 //   SERVER=node ...                   the host is the headless dedicated server
-//                                     (tools/server/run-server.mjs) instead of a page
+//                                     (tools/server/run-server.mjs) instead of a page;
+//                                     SERVER_BIN=<dir> picks its build
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -95,7 +96,9 @@ const save = () => {
 // The headless server as the host: same log/screenshot interface as a page.
 async function nodeServer() {
   const p = { name: 'host', lines: [], star: null };
-  const proc = spawn(process.execPath, [new URL('../server/run-server.mjs', import.meta.url).pathname, '--net', net], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const args = [new URL('../server/run-server.mjs', import.meta.url).pathname, '--net', net];
+  if (process.env.SERVER_BIN) args.push('--bin', process.env.SERVER_BIN); // e.g. build/wasm/bin for the debug build's logs
+  const proc = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   const onData = (d) => {
     for (const t of d.toString().split('\n').filter(Boolean)) {
