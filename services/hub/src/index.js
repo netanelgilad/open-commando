@@ -1,11 +1,13 @@
 // Datagram hub: the routing half of the game's virtual network (see
 // web/net.js for the frame format). Each room is a Durable Object that
 // works like a network switch: it gives every endpoint that connects an
-// address (10.0.x.y), then forwards each datagram frame to the endpoint
-// with the destination address, or to all others for a broadcast. The
-// sender's address is stamped by the hub, so endpoints can't spoof it.
+// address (10.0.x.y; the match server, ?role=server, is always 10.0.0.1 so
+// clients can be told where to +connect), then forwards each datagram frame
+// to the endpoint with the destination address, or to all others for a
+// broadcast. The sender's address is stamped by the hub, so endpoints can't
+// spoof it.
 //
-//   GET /room/<name>  (WebSocket upgrade)  join a room
+//   GET /room/<name>[?role=server]  (WebSocket upgrade)  join a room
 //   GET /ping         (WebSocket upgrade)  echo, for measuring latency
 import { DurableObject } from 'cloudflare:workers';
 
@@ -28,11 +30,13 @@ export class Room extends DurableObject {
   }
 
   async fetch(request) {
+    const isServer = new URL(request.url).searchParams.get('role') === 'server';
+    if (isServer && this.byAddress.has(addressFor(1))) return new Response('room already has a server', { status: 409 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    let n = 2;
-    while (this.byAddress.has(addressFor(n))) n++;
+    let n = isServer ? 1 : 2;
+    while (!isServer && this.byAddress.has(addressFor(n))) n++;
     const ip = addressFor(n);
     server.serializeAttachment({ ip });
     this.byAddress.set(ip, server);

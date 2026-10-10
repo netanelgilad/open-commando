@@ -104,7 +104,8 @@ bMotd=
 
 const require = createRequire(import.meta.url);
 const RebelNet = require(join(engine, 'web/net.js'));
-const net = RebelNet.create(opt.net);
+// The match server takes the room's fixed address (10.0.0.1, see the hub).
+const net = RebelNet.create(opt.net + (opt.net.includes('?') ? '&' : '?') + 'role=server');
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
 net.log = (t) => console.log(`${stamp()} [net] ${t}`);

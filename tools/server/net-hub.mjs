@@ -18,12 +18,16 @@ const addressFor = (n) => (10 | ((n >> 8) << 16) | ((n & 255) << 24)) >>> 0; // 
 const rooms = new Map(); // name -> Map(address -> ws)
 const wss = new WebSocketServer({ port: +opt.port, host: '127.0.0.1' });
 wss.on('connection', (ws, req) => {
-  const m = /^\/room\/([\w-]{1,64})$/.exec(req.url);
+  const url = new URL(req.url, 'ws://hub');
+  const m = /^\/room\/([\w-]{1,64})$/.exec(url.pathname);
   if (!m) return ws.close(1008, 'not found');
   let room = rooms.get(m[1]);
   if (!room) rooms.set(m[1], (room = new Map()));
-  let n = 2;
-  while (room.has(addressFor(n))) n++;
+  // The match server (?role=server) is always 10.0.0.1.
+  const isServer = url.searchParams.get('role') === 'server';
+  if (isServer && room.has(addressFor(1))) return ws.close(1008, 'room already has a server');
+  let n = isServer ? 1 : 2;
+  while (!isServer && room.has(addressFor(n))) n++;
   const ip = addressFor(n);
   room.set(ip, ws);
   ws.send(JSON.stringify({ type: 'hello', address: ipToString(ip) }));

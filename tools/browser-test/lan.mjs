@@ -8,12 +8,14 @@
 //
 //   BASE=http://127.0.0.1:8461/dbg/ node lan.mjs
 //   NETLAG=100 NETLOSS=0.05 ...       simulate a worse connection
+//   JOIN=connect ...                  clients join with +connect 10.0.0.1:4848 (the way
+//                                     matchmaking will) instead of the LAN game list
 //   SERVER=node ...                   the host is the headless dedicated server
 //                                     (tools/server/run-server.mjs) instead of a page;
 //                                     SERVER_BIN=<dir> picks its build
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 const outDir = new URL('./out/', import.meta.url).pathname;
 mkdirSync(outDir, { recursive: true });
 const base = process.env.BASE || 'http://127.0.0.1:8461/';
@@ -54,7 +56,8 @@ async function player(name, profile) {
   page.on("pageerror", (e) => { p.crashed = true; console.log(`${stamp()} ${name}: PAGEERROR ${e.message}\n${e.stack}`); });
   // CLIENT_BASE: the first client from another build (e.g. /dbg/ for its logs).
   const from = name === 'client' && process.env.CLIENT_BASE ? process.env.CLIENT_BASE : base;
-  await page.goto(`${from}?nolock${from === base ? '&quiet' : ''}&noguard&name=${p.nick}&net=${encodeURIComponent(net)}${extra}`);
+  const args = name !== 'host' && process.env.JOIN === 'connect' ? `&args=${encodeURIComponent(`+connect 10.0.0.1:4848 +netplayername ${p.nick}`)}` : '';
+  await page.goto(`${from}?nolock${from === base ? '&quiet' : ''}&noguard&name=${p.nick}&net=${encodeURIComponent(net)}${extra}${args}`);
   await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
   // HOST_PLAYS=1: the page host also plays (the install's default host
   // settings, Data/svrcfg_cnc.ini, say IsDedicated=yes). Edits this
@@ -175,7 +178,7 @@ try {
     const c = await player(i ? `client${i + 1}` : 'client', ['profile-b', 'profile-c', 'profile-d'][i]);
     players.push(c);
     clients.push(c);
-    await join(c);
+    if (process.env.JOIN !== 'connect') await join(c);
   }
   // SERVER_CMDS="a;b": console commands for the Node server once everyone joined.
   if (host.proc && process.env.SERVER_CMDS) host.proc.stdin.write(process.env.SERVER_CMDS.split(';').join('\n') + '\n');
@@ -199,6 +202,7 @@ try {
   }
   for (const p of players) await shot(p, 'joined');
   for (const p of players) console.log(`${stamp()} ${p.name} star: ${p.star} net ${await netStats(p)}`);
+  if (host.proc) console.log(`${stamp()} server process: ${execFileSync('ps', ['-o', 'time=,rss=', '-p', String(host.proc.pid)]).toString().trim()} (cpu time, rss KB)`);
   if (clients.some((c) => !c.star)) process.exitCode = 1;
 } catch (e) {
   console.log('FAILED: ' + e.message);

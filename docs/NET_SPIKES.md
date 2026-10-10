@@ -45,9 +45,11 @@ stamps the sender's address, so endpoints can't spoof each other.
 Question: does the engine's multiplayer work in the wasm build at all, over
 emulated sockets?
 
-**Yes.** Host and client pages (separate browser profiles) meet through the
-hub: the host's LAN broadcast shows its game in the client's original LAN
-Game List, and the client joins.
+**Yes.** Two browser clients (separate profiles) play one C&C match on the
+headless server (S3), all datagrams through the hub: the server's LAN
+broadcast shows its game in the original LAN Game List, both join, spawn in
+their bases (one per team, as C&C requires before gameplay starts) and walk.
+A browser host that also plays (non-dedicated) works the same way.
 
 - **Built:** vnet.cpp, web/net.js (`?net=tab:<room>`), LAN discovery
   broadcast re-enabled (`cNetUtil::Broadcast` had its `sendto` commented out
@@ -68,6 +70,21 @@ Game List, and the client joins.
     nickname-collision check fired correctly when both were "BROWSER".
   - Two debug builds on this Mac mini run at 0-3 fps; use release builds
     for multiplayer tests.
+  - **The big one: the tick clock.** Clients connected but never got the
+    world or a soldier; both sides only exchanged keepalives. Cause:
+    `GetTickCount`'s boot time was a global, and engine statics read the
+    clock during static initialization (`SysTimeClass`) before it was set,
+    so `TIMEGETTIME` started from the raw steady clock (this Mac's uptime,
+    7.5 days) and every later reading "wrapped" to ~2^32. The netcode's
+    signed time comparisons then always failed
+    (`Server_Update_Dynamic_Objects` skipped every player). Fixed by taking
+    the boot time on first use. Found with a temporary trace in the server's
+    update loop, after ruling out bandwidth (balancer, sbbo) and the hub.
+    Single player only uses unsigned differences, which is why it never
+    showed there.
+  - Clients in a LAN game keep processing LAN broadcasts, and each one
+    checks the map exists (a file lookup): 100 ms+ stalls per broadcast in
+    debug builds. Matchmade games won't use LAN discovery (see S4).
 - **Version lock:** clients and server must be the same build. The exe key
   (`cNetwork::Compute_Exe_Key`) is the build's git hash plus a CRC of the
   data files; a mismatch shows as "Exe version mismatch" in the game list
@@ -94,6 +111,14 @@ in latency?
 - Local (`wrangler dev`): routing verified with two Node endpoints;
   round trip endpoint -> DO -> endpoint -> DO -> endpoint median 1.9 ms,
   p99 4.5 ms (no network in the way: this is the DO's own overhead).
+- Under game load on this Mac (two browser clients + server + workerd),
+  the probes (`net.probe()`: a frame to yourself through the hub, through
+  the same event loop as the game) showed medians of 1.5-5 ms but spikes of
+  100 ms to 3.4 s through `wrangler dev`. The same protocol as a plain Node
+  WebSocket server (`tools/server/net-hub.mjs`): median 0.7-0.9 ms, worst
+  7-17 ms. So local workerd stalls under load; production DOs to measure
+  (S5). The engine itself adds latency on top: it sends at NetUpdateRate
+  (10/s) and reported 50-160 ms pings to the clients on localhost.
 
 ## S3: headless dedicated server under Node
 
@@ -115,7 +140,25 @@ Gameplay Pending  Map : C&C_Field.mix  Fps : 55  GDI : 0/16  NOD : 0/16
 ```
 
 - Idle server: ~11% of one core (16.5 s CPU in 150 s) with the LAN
-  broadcast going. To measure: CPU and bandwidth per player in a match.
+  broadcast going.
+- Two players in a match: ~16% of one core (29.5 s CPU over 185 s,
+  including the map load), 65 MB resident; ~3.2 KB/s out for two players
+  (~1.6 KB/s each) right after spawning. Larger matches to measure.
+- The server console reads stdin: `game_info`, `player_info` (ping,
+  address, score per player), `amsg`, `kick`... as on the original FDS.
 - The work directory mirrors the install with hard links (WasmFS's Node
   backend doesn't follow symlinks) plus our `server.ini` and
   `Data/svrcfg_open.ini`; the install is never written to.
+
+## S4: direct join, the way matchmaking will do it
+
+Question: can a client go straight from the page into a given match, with
+no menus?
+
+**Yes.** The match server joins its hub room with `?role=server` and always
+gets 10.0.0.1; a client page opened with
+`?net=<room URL>&args=+connect 10.0.0.1:4848 +netplayername <name>` skips
+the menus (the engine's GameSpy-launch path: `cGameSpyAdmin` ->
+`Connect_To_Game_Server`), loads the map and spawns. The bandwidth test that
+path runs first fails harmlessly (no raw sockets) and falls back to a
+default. Test: `JOIN=connect SERVER=node node lan.mjs`.
