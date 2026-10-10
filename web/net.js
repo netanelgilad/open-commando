@@ -128,9 +128,32 @@ const RebelNet = (() => {
       if (delay > 0) setTimeout(fn, delay); else fn();
     };
 
+    // Latency probe: a frame to our own address, port 0, carrying the send
+    // time; the hub routes it back like any datagram.
+    const probe = { sent: 0, rtts: [] };
+    net.probe = () => {
+      if (!net.address) return;
+      const payload = new Uint8Array(8);
+      new DataView(payload.buffer).setFloat64(0, performance.now(), true);
+      net.transport.send(encode(net.address, 0, net.address, 0, payload));
+      probe.sent++;
+    };
+    // Median and worst round trip since the last call (ms), and how many came back.
+    net.probeStats = () => {
+      const r = probe.rtts.sort((a, b) => a - b);
+      const out = { n: r.length, sent: probe.sent, median: r.length ? +r[r.length >> 1].toFixed(1) : null, max: r.length ? +r[r.length - 1].toFixed(1) : null };
+      probe.rtts = [];
+      probe.sent = 0;
+      return out;
+    };
+
     const onFrame = (frame) => {
       const d = decode(frame);
       if (!d || !net.address) return;
+      if (d.toPort === 0 && d.fromIp === net.address && d.data.length === 8) {
+        probe.rtts.push(performance.now() - new DataView(d.data.buffer, d.data.byteOffset, 8).getFloat64(0, true));
+        return;
+      }
       if (d.toIp !== net.address && d.toIp !== BROADCAST) return;
       if (d.fromIp === net.address) return; // our own broadcast, already looped back
       impair(() => deliver(d));

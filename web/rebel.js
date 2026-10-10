@@ -136,6 +136,10 @@ if (params.get('net')) {
     });
     Module.rebelNet.log = (t) => log('[net] ' + t);
     Module.rebelNet.ready.catch((e) => log('[net] ' + e.message));
+    // Round trips through the transport (and this page's event loop, which
+    // the game shares), logged every 10 s.
+    setInterval(() => Module.rebelNet.probe(), 200);
+    setInterval(() => log('[net] rtt ' + JSON.stringify(Module.rebelNet.probeStats()) + ' ' + JSON.stringify(Module.rebelNet.stats)), 10000);
   } catch (e) {
     log('[net] ' + e.message);
   }

@@ -9,6 +9,15 @@
 
 static bool PendingDump = false;
 extern "C" void Rebel_Debug_Dump(void) { PendingDump = true; } // queued, see Rebel_Run_Pending_Actions
+
+// Console commands (game_info, player_info, amsg, kick...), as typed at the
+// Free Dedicated Server's console: the Node server (tools/server) passes its
+// stdin lines here. Queued like the other hooks.
+#include "consolefunction.h"
+#include <string>
+#include <vector>
+static std::vector<std::string> PendingConsole;
+extern "C" void Rebel_Console_Command(const char *line) { PendingConsole.push_back(line); }
 static void Dump_Modes(void) {
   static const char *names[] = {"Combat", "Console", "LAN", "Menu", "Movie", "Overlay", "ScoreScreen", "TextDisplay", "WOL"};
   fprintf(stderr, "[debug] game modes:");
@@ -84,6 +93,12 @@ static void Save_Test_Game(void);
 static void Load_Test_Game(void);
 
 extern "C" void Rebel_Run_Pending_Actions(void) {
+  if (!PendingConsole.empty()) {
+    std::vector<std::string> lines;
+    lines.swap(PendingConsole);
+    for (const std::string &line : lines)
+      ConsoleFunctionManager::Parse_Input(line.c_str());
+  }
   if (PendingCampaign >= 0) {
     int difficulty = PendingCampaign;
     PendingCampaign = -1;

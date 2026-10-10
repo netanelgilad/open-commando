@@ -8,6 +8,9 @@
 //     [--game <install dir>] [--bin build/wasm-release/bin] [--map C&C_Field.mix]
 //     [--players 16] [--name "Open Commando"] [--work /tmp/rebel-server]
 //
+// Type console commands on stdin (game_info, player_info, amsg <text>, kick
+// <name>, quit...), as at the original server's console.
+//
 // The game files are never modified: the work directory mirrors the install,
 // plus the server's own settings (server.ini, Data/svrcfg_open.ini). Large
 // assets are hard links (WasmFS's Node backend doesn't follow symlinks);
@@ -18,6 +21,7 @@ import { copyFileSync, linkSync, mkdirSync, readdirSync, rmSync, statSync, write
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { createInterface } from 'node:readline';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const engine = resolve(here, '../..');
@@ -114,9 +118,16 @@ globalThis.rebelNodeModule = {
   locateFile: (p) => join(opt.bin, p),
   onAbort: (what) => { console.log(`${stamp()} [abort] ${what && what.stack || what}`); process.exit(1); },
   onRuntimeInitialized() { // `this` is the game's Module
+    const game = this;
+    // The server console: each line on stdin is a game console command.
+    createInterface({ input: process.stdin }).on('line', (line) => {
+      if (line.trim()) game.ccall('Rebel_Console_Command', null, ['string'], [line.trim()]);
+    });
     this.callMain([`--root=${root}`, 'STARTSERVER=server.ini', 'NODX']);
   },
 };
 require(join(opt.bin, 'renegade.js'));
-// Report traffic every 10 s.
-setInterval(() => console.log(`${stamp()} [net] ${JSON.stringify(net.stats)}`), 10000).unref();
+// Round trips through the hub (and this event loop, which the game shares)
+// and traffic, every 10 s.
+setInterval(() => net.probe(), 200).unref();
+setInterval(() => console.log(`${stamp()} [net] rtt ${JSON.stringify(net.probeStats())} ${JSON.stringify(net.stats)}`), 10000).unref();

@@ -98,7 +98,7 @@ async function nodeServer() {
   const p = { name: 'host', lines: [], star: null };
   const args = [new URL('../server/run-server.mjs', import.meta.url).pathname, '--net', net];
   if (process.env.SERVER_BIN) args.push('--bin', process.env.SERVER_BIN); // e.g. build/wasm/bin for the debug build's logs
-  const proc = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   let ready = false;
   const onData = (d) => {
     for (const t of d.toString().split('\n').filter(Boolean)) {
@@ -163,6 +163,7 @@ try {
   for (let i = 0; i < 36 && clients.some((c) => !c.star); i++) {
     await clients[0].page.waitForTimeout(5000);
     for (const c of clients) await dump(c);
+    if (host.proc && i % 4 === 0) host.proc.stdin.write('game_info\nplayer_info\n');
   }
   // Walk forward a little and check the soldier moved.
   for (const c of clients.filter((x) => x.star)) {
