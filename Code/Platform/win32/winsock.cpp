@@ -68,10 +68,24 @@ extern "C" void WSASetLastError(int err) {
     errno = 0;
 }
 
-extern "C" int closesocket(SOCKET s) { return close(s) == 0 ? 0 : SOCKET_ERROR; }
+extern "C" int closesocket(SOCKET s) {
+  if (Rebel_Net_Is_Socket(s))
+    return Rebel_Net_Close(s);
+  return close(s) == 0 ? 0 : SOCKET_ERROR;
+}
 
 extern "C" int ioctlsocket(SOCKET s, long cmd, unsigned long *arg) {
   SocketError = 0;
+  if (Rebel_Net_Is_Socket(s)) {
+    if (cmd == (long)FIONBIO)
+      return 0; // virtual sockets never block
+    if (cmd == (long)FIONREAD) {
+      *arg = (unsigned long)Rebel_Net_Pending_Bytes(s);
+      return 0;
+    }
+    SocketError = WSAEINVAL;
+    return SOCKET_ERROR;
+  }
   if (cmd == (long)FIONBIO) {
     int flags = fcntl(s, F_GETFL, 0);
     if (flags < 0)

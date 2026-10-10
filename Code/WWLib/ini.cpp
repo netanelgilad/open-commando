@@ -941,11 +941,15 @@ int INIClass::Get_UUBlock(char const *section, void *block, int len) const {
  *=============================================================================================*/
 const WideStringClass &INIClass::Get_Wide_String(WideStringClass &new_string, char const *section, char const *entry,
                                                  wchar_t const *defvalue) const {
+#ifdef REBEL_PORTABLE
+  unsigned short out[1024] = {}; // stored as UTF-16 (see Put_Wide_String)
+#else
   wchar_t out[1024];
+#endif
   char buffer[1024];
 
   Base64Pipe b64pipe(Base64Pipe::DECODE);
-  BufferPipe bpipe(out, sizeof(out));
+  BufferPipe bpipe(out, sizeof(out) - sizeof(out[0]));
   b64pipe.Put_To(&bpipe);
 
   int length = Get_String(section, entry, "", buffer, sizeof(buffer));
@@ -954,7 +958,16 @@ const WideStringClass &INIClass::Get_Wide_String(WideStringClass &new_string, ch
   } else {
     int outcount = b64pipe.Put(buffer, length);
     outcount += b64pipe.End();
+#ifdef REBEL_PORTABLE
+    wchar_t wide[1024];
+    int i = 0;
+    for (; i < 1023 && out[i]; i++)
+      wide[i] = out[i];
+    wide[i] = 0;
+    new_string = wide;
+#else
     new_string = out;
+#endif
   }
   return (new_string);
 }
@@ -989,7 +1002,16 @@ bool INIClass::Put_Wide_String(char const *section, char const *entry, const wch
 
     char *buffer = (char *)_alloca((len * 8) + 32);
 
+#ifdef REBEL_PORTABLE
+    // The stored form is UTF-16, as on Windows; wchar_t is 4 bytes here.
+    unsigned short *utf16 = (unsigned short *)_alloca((len + 1) * 2);
+    for (int i = 0; i < len; i++)
+      utf16[i] = (unsigned)string[i] > 0xFFFF ? (unsigned short)'?' : (unsigned short)string[i];
+    utf16[len] = 0;
+    BufferStraw straw(utf16, (len * 2) + 2);
+#else
     BufferStraw straw(string, (len * 2) + 2); // Convert from shorts to bytes, plus 2 for terminator.
+#endif
     Base64Straw bstraw(Base64Straw::ENCODE);
     bstraw.Get_From(straw);
 

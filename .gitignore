@@ -73,3 +73,7 @@ tools/browser-test/profile/
 tools/browser-test/profile-*/
 tools/browser-test/out/
 /dist/
+
+# Wrangler local state and per-service dependencies
+.wrangler/
+services/*/node_modules/

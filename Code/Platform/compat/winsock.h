@@ -111,6 +111,17 @@ int ioctlsocket(SOCKET s, long cmd, unsigned long *arg);
 #endif
 
 #ifdef __cplusplus
+extern "C" {
+#endif
+/* Datagram sockets are virtual (Platform/net/vnet.cpp). */
+bool Rebel_Net_Is_Socket(int fd);
+int Rebel_Net_Close(int fd);
+int Rebel_Net_Pending_Bytes(int fd);
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
 /* Winsock takes address/option lengths as int*; POSIX uses socklen_t*. */
 inline ssize_t recvfrom(SOCKET s, char *buf, int len, int flags, struct sockaddr *from, int *fromlen) {
   socklen_t l = fromlen ? (socklen_t)*fromlen : 0;

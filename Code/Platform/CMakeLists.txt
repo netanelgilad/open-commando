@@ -5,6 +5,7 @@ file(GLOB REBEL_PLATFORM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/input/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/net/vnet.cpp
 )
 add_library(RebelPlatform STATIC ${REBEL_PLATFORM_SOURCES})
 target_include_directories(RebelPlatform
@@ -22,6 +23,10 @@ target_link_options(RebelPlatform INTERFACE -lopenal)
 # Route every libc path entry point through Rebel_Resolve_Path (path_resolve.cpp).
 set(REBEL_WRAPPED_PATH_FUNCS fopen freopen open stat lstat access opendir mkdir rmdir unlink remove rename chdir truncate)
 foreach(_fn ${REBEL_WRAPPED_PATH_FUNCS})
+    target_link_options(RebelPlatform INTERFACE "LINKER:--wrap=${_fn}")
+endforeach()
+# Datagram sockets go to the virtual network (net/vnet.cpp).
+foreach(_fn socket bind sendto recvfrom setsockopt getsockopt getsockname gethostname gethostbyname)
     target_link_options(RebelPlatform INTERFACE "LINKER:--wrap=${_fn}")
 endforeach()
 

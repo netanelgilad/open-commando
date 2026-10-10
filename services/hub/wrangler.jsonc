@@ -1,0 +1,13 @@
+// Datagram hub for the game's virtual network (web/net.js): one Durable
+// Object per room routes frames between the endpoints connected to it.
+//   wrangler dev --config services/hub/wrangler.jsonc   (local, port 8787)
+{
+  "name": "open-commando-hub",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "workers_dev": true
+}

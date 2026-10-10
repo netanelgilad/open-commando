@@ -107,6 +107,7 @@ function gameResolution() {
 
 var Module = {
   rebelFrame: rebelFrameTick,
+  rebelPlayerName: (params.get('name') || '').replace(/[^\w\-\[\]]/g, '').slice(0, 20) || undefined, // nickname
   rebelPacing: params.has('raf') ? 'raf' : params.has('noraf') ? 'spin' : 'auto', // see Rebel_JS_Wait_Frame
   canvas,
   arguments: [...(params.get('args') || '').split(' ').filter(Boolean), '--res=' + gameResolution()],
@@ -122,6 +123,23 @@ var Module = {
   },
 };
 window.Module = Module;
+
+// Multiplayer network (web/net.js): ?net=tab:<room> joins the other tabs of
+// this browser in <room>; ?net=ws://host/... a routing hub. ?netlag=ms,
+// ?netjitter=ms and ?netloss=0..1 simulate a worse connection.
+if (params.get('net')) {
+  try {
+    Module.rebelNet = RebelNet.create(params.get('net'), {
+      latency: +params.get('netlag') || 0,
+      jitter: +params.get('netjitter') || 0,
+      loss: +params.get('netloss') || 0,
+    });
+    Module.rebelNet.log = (t) => log('[net] ' + t);
+    Module.rebelNet.ready.catch((e) => log('[net] ' + e.message));
+  } catch (e) {
+    log('[net] ' + e.message);
+  }
+}
 
 let running = false;
 function post(msg, wp, lp) { if (running) Module._Rebel_Post_Message(msg, wp >>> 0, lp | 0); }

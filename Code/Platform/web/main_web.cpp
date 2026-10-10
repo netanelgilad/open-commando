@@ -8,6 +8,10 @@
 **   /rebel/chat.res       dialog resources compiled from Commando/chat.rc
 ** The page (web/index.html) fills /opfs/renegade from the user's own install
 ** before calling main. Everything else is the unmodified WinMain.
+**
+** The same build also runs under Node as a headless dedicated server
+** (tools/server/run-server.mjs): there /opfs is a host directory given with
+** --root=<dir> (holding renegade/ and persist/) instead of the OPFS.
 */
 #include "windows.h"
 
@@ -100,15 +104,25 @@ static void Hang_Watchdog() {
 
 int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
-  // The OPFS backend spawns its own proxy worker, which may not be started
-  // from the browser main thread: mount from a short-lived pthread.
+  const char *host_root = nullptr; // Node: a host directory instead of the OPFS
+  for (int i = 1; i < argc; i++)
+    if (strncmp(argv[i], "--root=", 7) == 0)
+      host_root = argv[i] + 7;
   int mount_result = -1;
-  std::thread([&] {
-    backend_t opfs = wasmfs_create_opfs_backend();
-    mount_result = wasmfs_create_directory("/opfs", 0777, opfs);
-  }).join();
+  if (host_root && EM_ASM_INT({ return typeof process === 'object' && !!process.versions && !!process.versions.node; })) {
+    mount_result = wasmfs_create_directory("/opfs", 0777, wasmfs_create_node_backend(host_root));
+  } else {
+    // The OPFS backend spawns its own proxy worker, which may not be started
+    // from the browser main thread: mount from a short-lived pthread.
+    std::thread([&] {
+      backend_t opfs = wasmfs_create_opfs_backend();
+      mount_result = wasmfs_create_directory("/opfs", 0777, opfs);
+    }).join();
+  }
   if (mount_result != 0) {
-    fprintf(stderr, "[rebel] could not mount OPFS; is this a secure context with cross-origin isolation?\n");
+    fprintf(stderr, host_root ? "[rebel] could not mount %s\n"
+                              : "[rebel] could not mount OPFS; is this a secure context with cross-origin isolation?\n",
+            host_root);
     return 1;
   }
 #endif
@@ -133,6 +147,8 @@ int main(int argc, char **argv) {
   std::string cmd = "Game.exe";
   for (int i = 1; i < argc; i++) {
     int w = 0, h = 0;
+    if (strncmp(argv[i], "--root=", 7) == 0)
+      continue;
     if (sscanf(argv[i], "--res=%dx%d", &w, &h) == 2) {
       if (w >= 640 && h >= 480 && w <= 7680 && h <= 4320)
         Store_Resolution(w, h);

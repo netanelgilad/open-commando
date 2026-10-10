@@ -564,13 +564,20 @@ extern "C" DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR buf, DWORD size) {
   return len;
 }
 
+// The player's name from the page (Module.rebelPlayerName, e.g. ?name=), or
+// the given default. LAN games use the computer name as the nickname.
+EM_JS(void, Rebel_JS_Player_Name, (char *buf, int size, const char *fallback), {
+  const name = Module.rebelPlayerName || UTF8ToString(fallback);
+  stringToUTF8(name, buf, size);
+});
+
 extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD size) {
-  snprintf(buf, *size, "BROWSER");
+  Rebel_JS_Player_Name(buf, (int)*size, "BROWSER");
   *size = (DWORD)strlen(buf);
   return TRUE;
 }
 extern "C" BOOL GetUserNameA(LPSTR buf, LPDWORD size) {
-  snprintf(buf, *size, "Player");
+  Rebel_JS_Player_Name(buf, (int)*size, "Player");
   *size = (DWORD)strlen(buf) + 1;
   return TRUE;
 }

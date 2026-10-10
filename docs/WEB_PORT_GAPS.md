@@ -41,9 +41,19 @@ where the shortcut lives and what "done" looks like.
 ## Networking
 
 - **Westwood Online / GameSpy** code paths are excluded (`connect.cpp`,
-  `#ifndef REBEL_PORTABLE`). Multiplayer needs a WebSocket/WebRTC transport
-  and a lobby to replace them. Plan: `docs/ONLINE_PLAN.md` (Durable Objects
-  for lobby/matchmaking/signaling, WebRTC for game traffic, dedicated server).
+  `#ifndef REBEL_PORTABLE`) and their services are offline.
+- **Datagram sockets are virtual** (`Code/Platform/net/vnet.cpp`, page side
+  `web/net.js`): `?net=ws://.../room/<name>` joins a hub room
+  (`services/hub`), `?net=tab:<room>` other tabs. Stream (TCP) sockets still
+  go to libc and fail (bandwidth test, GameSpy, WOL). There is no DNS:
+  only dotted quads and the local host name resolve. Plan and spike log:
+  `docs/ONLINE_PLAN.md`, `docs/NET_SPIKES.md`.
+- **One game per browser profile.** Two tabs of the same profile share the
+  OPFS game files, and the first tab holds exclusive sync access handles on
+  them (the read-fd pool), so a second tab's file reads fail and it crashes
+  while booting. Fix later: read-only access handles (Chrome's
+  `createSyncAccessHandle({mode: 'read-only'})`) or a "game already open in
+  another tab" message (Web Locks).
 
 ## Platform
 

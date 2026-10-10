@@ -380,8 +380,9 @@ if(REBEL_PORTABLE)
         -sMIN_WEBGL_VERSION=2
         -sMAX_WEBGL_VERSION=2
         -sEXIT_RUNTIME=0
-        -sENVIRONMENT=web,worker
+        -sENVIRONMENT=web,worker,node # node: the headless dedicated server (tools/server)
         -sINVOKE_RUN=0
+        "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/Code/Platform/web/node_pre.js"
         -sMODULARIZE=0
         "SHELL:-sEXPORTED_FUNCTIONS=_main,_Rebel_Post_Message,_Rebel_Set_Screen_Size,_Rebel_Input_Key,_Rebel_Input_Mouse_Move,_Rebel_Input_Mouse_Wheel,_Rebel_Input_Mouse_Button,_Rebel_Input_Release_All,_Rebel_Audio_Update,_Rebel_Debug_Dump,_Rebel_Input_Set_Cursor,_Rebel_Debug_Start_Campaign,_Rebel_Debug_Input,_Rebel_Debug_Bring_Target,_Rebel_Debug_Damage_Target,_Rebel_Debug_Save,_Rebel_Debug_Load,_Rebel_Debug_Win_Mission,_Rebel_Audio_Stats,_Rebel_Debug_Open_Eva,_Rebel_Debug_Command,_Rebel_Debug_List_Controls,_Rebel_Debug_Stall,_Rebel_Debug_Spawn_Vehicle,_Rebel_Debug_Enter_Vehicle,_malloc,_free"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=callMain,ccall,cwrap,UTF8ToString,stringToUTF8,HEAPU16"
