@@ -78,3 +78,6 @@ tools/browser-test/out/
 .wrangler/
 services/*/node_modules/
 tools/*/node_modules/
+
+# Match service deploy secrets (generated locally)
+services/match/.secrets.json

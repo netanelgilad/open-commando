@@ -22,12 +22,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline';
+import { createServer } from 'node:http';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const engine = resolve(here, '../..');
 const { values: opt } = parseArgs({
   options: {
-    net: { type: 'string' },
+    net: { type: 'string', default: process.env.REBEL_NET },
     game: { type: 'string', default: process.env.REBEL_GAME_DIR || resolve(engine, '../game-data/renegade') },
     bin: { type: 'string', default: join(engine, 'build/wasm-release/bin') },
     work: { type: 'string', default: '/tmp/rebel-server' },
@@ -36,17 +37,23 @@ const { values: opt } = parseArgs({
     name: { type: 'string', default: 'Open Commando' },
     port: { type: 'string', default: '4848' },
     minutes: { type: 'string', default: '30' },
+    // The work directory already holds the game as renegade/ (our own server
+    // image): use it as is instead of mirroring --game.
+    'in-place': { type: 'boolean', default: false },
+    // HTTP status on this port (a container's health check): {"ready":
+    // true once the map is loaded, "log": recent lines}.
+    'status-port': { type: 'string', default: process.env.REBEL_STATUS_PORT },
   },
 });
 if (!opt.net) {
-  console.error('--net <hub room URL> is required');
+  console.error('--net <hub room URL> (or REBEL_NET) is required');
   process.exit(2);
 }
 
 // Work directory: renegade/ mirrors the install, persist/ holds the registry.
 const root = resolve(opt.work);
 const game = join(root, 'renegade');
-rmSync(game, { recursive: true, force: true });
+if (!opt['in-place']) rmSync(game, { recursive: true, force: true });
 mkdirSync(join(root, 'persist'), { recursive: true });
 const LINK_MIN_BYTES = 1 << 20;
 const mirror = (from, to) => {
@@ -61,7 +68,7 @@ const mirror = (from, to) => {
     }
   }
 };
-mirror(opt.game, game);
+if (!opt['in-place']) mirror(opt.game, game);
 
 writeFileSync(join(game, 'server.ini'), `[Server]
 Config = svrcfg_open.ini
@@ -115,14 +122,29 @@ try {
 }
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
-net.log = (t) => console.log(`${stamp()} [net] ${t}`);
+const recent = [];
+let ready = false;
+const out = (t) => {
+  const line = `${stamp()} ${t}`;
+  console.log(line);
+  recent.push(line);
+  if (recent.length > 200) recent.shift();
+  if (/Gameplay Pending|Gameplay in progress/.test(t)) ready = true;
+};
+if (opt['status-port']) {
+  createServer((req, res) => {
+    res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ready, uptime: +stamp(), net: net.stats, log: recent.slice(-40) }));
+  }).listen(+opt['status-port']);
+}
+net.log = (t) => out(`[net] ${t}`);
 await net.ready;
 
 globalThis.rebelNodeModule = {
   rebelNet: net,
   rebelPlayerName: 'Host',
-  print: (t) => console.log(`${stamp()} ${t}`),
-  printErr: (t) => console.log(`${stamp()} ${t}`),
+  print: out,
+  printErr: out,
   locateFile: (p) => join(opt.bin, p),
   onAbort: (what) => { console.log(`${stamp()} [abort] ${what && what.stack || what}`); process.exit(1); },
   onRuntimeInitialized() { // `this` is the game's Module
@@ -138,4 +160,4 @@ require(join(opt.bin, 'renegade.js'));
 // Round trips through the hub (and this event loop, which the game shares)
 // and traffic, every 10 s.
 setInterval(() => net.probe(), 200).unref();
-setInterval(() => console.log(`${stamp()} [net] rtt ${JSON.stringify(net.probeStats())} ${JSON.stringify(net.stats)}`), 10000).unref();
+setInterval(() => out(`[net] rtt ${JSON.stringify(net.probeStats())} ${JSON.stringify(net.stats)}`), 10000).unref();

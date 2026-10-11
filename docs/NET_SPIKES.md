@@ -201,8 +201,7 @@ default. Test: `JOIN=connect SERVER=node node lan.mjs`.
   room; the engine and server don't change.
 
 Next spikes:
-- **S5:** the hub on real Cloudflare: round trips from here to a deployed
-  Durable Object, steady and under load.
+- **S5:** done, see below.
 - **S6:** the server in a Cloudflare Container: image, cold start, CPU and
   memory per match, the DO <-> container WebSocket. Needs a decision on the
   game data in a private image (ONLINE_PLAN O6) and a Docker that can build
@@ -211,8 +210,7 @@ Next spikes:
   (`maxRetransmits: 0`) through Cloudflare TURN to the server (TURN over
   TLS on 443 works from containers), vs. WebSocket under packet loss
   (`?netloss=`).
-- **S8:** the matchmaker Durable Object (tickets, ping windows, backfill),
-  against simulated players.
+- **S8:** the matching pass is done (below); next its Durable Object.
 
 ## S7a: WebRTC data channel transport (local)
 
@@ -237,3 +235,53 @@ for TURN); server: on by default (`REBEL_ICE_SERVERS`).
 - Still to measure on a real network: loss behaviour (WebSocket stalls a
   ~RTT on a lost packet; the channel just drops it, which the engine's own
   reliability layer handles) and TURN-relayed paths from a container.
+
+## S5: the hub on real Cloudflare
+
+`services/hub` deployed (open-commando-hub.netanelgilad.workers.dev).
+`tools/server/hub-probe.mjs`: two endpoints in a room, A -> DO -> B -> DO ->
+A every 50 ms for 30 s, from Israel (Cloudflare PoP: TLV, 6.6 ms ping):
+
+```
+592/592 round trips: min 141.9 median 145.1 p90 148.1 p99 170.1 max 194.6 ms (lost 0)
+```
+
+- That's two DO round trips, so ~72 ms per endpoint <-> DO round trip: the
+  Durable Object runs in a European location, not at the TLV PoP (DOs live
+  in a limited set of locations). Very steady (p99 within 25 ms of the
+  median), no spikes like `wrangler dev` had.
+- For a player the path is player -> PoP -> match DO -> container, so the
+  DO's location matters: put the match DO and its container in the same
+  region (location hints / container regions) and pick the region by the
+  players' pings. From Israel, European servers at ~70 ms is the normal
+  internet distance anyway.
+
+## S6: the match server in a Cloudflare Container (in progress)
+
+- `services/match`: one Worker with the hub's `Room` Durable Object plus a
+  `MatchServer` Container class (`@cloudflare/containers`): `POST
+  /match/<id>/start` starts the server with `REBEL_NET=wss://<host>/room/<id>`
+  (it dials into its own room as 10.0.0.1), `GET /match/<id>` shows its
+  status page (`run-server.mjs --status-port`: ready once the map is
+  loaded, recent log), `POST /match/<id>/stop`. Start/stop need the
+  START_TOKEN secret.
+- Image (`services/match/Dockerfile`, context from
+  `tools/build-server-image.sh`): node:24-slim, the release build, the
+  server scripts and the game data without movies or the single-player
+  missions (697 MB of data, 1.6 GB image). PRIVATE (owner's game data):
+  only in this account's registry.
+- Locally (Docker, amd64 emulated on this arm64 Mac): the container dials
+  the deployed hub, loads C&C_Field in ~4 s and reports ready.
+- This Mac's disk is nearly full (2 GB free): local Docker builds of a
+  1.6 GB image fill it (the VM's disk doesn't shrink back). Building images
+  in CI (GitHub Actions) would avoid that.
+
+## S8: the matching pass
+
+`services/match/src/matchmaker.js`: `pass({ tickets, matches, now })`,
+pure, unit-tested (`node --test services/match/test`): backfill first
+(onto the weaker team, only into matches under half played), then new
+matches from the oldest ticket, ping limit growing +20 ms per 10 s waited
+(60 -> 150 ms), start at 8 humans or after 45 s with bots filling to 8
+(never for one player alone), teams balanced by summed skill with parties
+kept whole.

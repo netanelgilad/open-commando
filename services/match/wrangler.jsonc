@@ -1,0 +1,27 @@
+// Match service: a room hub (the Room Durable Object from services/hub) plus
+// the match server in a Cloudflare Container, owned by a MatchServer Durable
+// Object per match. The server dials into its room as 10.0.0.1.
+//   tools/build-server-image.sh && npx wrangler deploy
+{
+  "name": "open-commando-match",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "containers": [
+    {
+      "class_name": "MatchServer",
+      "image": "../../build/match-image/Dockerfile",
+      "image_build_context": "../../build/match-image",
+      "instance_type": "basic",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "Room" },
+      { "name": "MATCH_SERVER", "class_name": "MatchServer" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "MatchServer"] }],
+  "observability": { "enabled": true },
+  "workers_dev": true
+}

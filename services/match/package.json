@@ -1,0 +1,1 @@
+{ "name": "open-commando-match", "private": true, "type": "module", "devDependencies": { "wrangler": "^4" }, "dependencies": { "@cloudflare/containers": "*" } }
