@@ -554,13 +554,54 @@ async function boot() {
   setStatus('Ready.');
   startBtn.hidden = false;
   startBtn.focus();
-  await new Promise((resolve) => startBtn.addEventListener('click', resolve, { once: true }));
+  const onlineBtn = $('online');
+  if (params.get('online')) onlineBtn.hidden = false;
+  await new Promise((resolve) => {
+    startBtn.addEventListener('click', resolve, { once: true });
+    onlineBtn.addEventListener('click', () => findMatch().then(resolve, (e) => setStatus('Online: ' + e.message)), { once: true });
+  });
   resumeAudio();
   overlay.style.display = 'none';
   installInput();
   running = true;
   canvas.focus();
   Module.callMain(Module.arguments);
+}
+
+// Online play (?online=<match service URL>): wait in the matchmaker's queue,
+// then join the match's room and start the game connected to its server
+// (docs/NET_SPIKES.md: S4, S8).
+async function findMatch() {
+  const service = params.get('online').replace(/^http/, 'ws').replace(/\/$/, '');
+  const name = Module.rebelPlayerName || 'Player' + Math.floor(Math.random() * 1000);
+  startBtn.hidden = true;
+  $('online').hidden = true;
+  setStatus('Finding a match…');
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    setStatus(`Finding a match… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+  }, 1000);
+  try {
+    const match = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}`);
+      ws.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.type === 'match') resolve(m);
+      };
+      ws.onerror = () => reject(new Error('could not reach the matchmaker'));
+      ws.onclose = (e) => { if (e.code !== 1000) reject(new Error('the matchmaker closed the connection')); };
+    });
+    log(`[net] matched: room ${match.room}, team ${match.team}`);
+    setStatus('Match found, joining…');
+    Module.rebelNet = RebelNet.create(`${service}/room/${match.room}`);
+    Module.rebelNet.log = (t) => log('[net] ' + t);
+    await Module.rebelNet.ready;
+    if (params.has('netrtc')) Module.rebelNet.enableRtc({ connectTo: '10.0.0.1' }).catch((e) => log('[net] rtc: ' + e.message));
+    Module.arguments.push('+connect', match.server, '+netplayername', name);
+  } finally {
+    clearInterval(tick);
+  }
 }
 
 boot().catch((e) => { setStatus('Startup failed: ' + e.message); log(String(e.stack || e)); });

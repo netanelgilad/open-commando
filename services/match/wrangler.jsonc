@@ -18,10 +18,17 @@
   "durable_objects": {
     "bindings": [
       { "name": "ROOMS", "class_name": "Room" },
-      { "name": "MATCH_SERVER", "class_name": "MatchServer" }
+      { "name": "MATCH_SERVER", "class_name": "MatchServer" },
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "MatchServer"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "MatchServer", "Matchmaker"] }],
+  "vars": {
+    "PUBLIC_WSS": "wss://open-commando-match.netanelgilad.workers.dev",
+    "REGION": "WEUR",
+    "MIN_PLAYERS": "2", // spike: start at two players (bots aren't wired yet)
+    "BOT_FILL_AFTER_MS": "45000"
+  },
   "observability": { "enabled": true },
   "workers_dev": true
 }

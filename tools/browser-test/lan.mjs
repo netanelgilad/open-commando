@@ -11,6 +11,8 @@
 //   NETRTC=1 ...                      clients reach the server over a WebRTC data channel
 //   JOIN=connect ...                  clients join with +connect 10.0.0.1:4848 (the way
 //                                     matchmaking will) instead of the LAN game list
+//   ONLINE=<match service URL>        no host: clients press "Play online", the
+//                                     matchmaker starts a server and sends them in
 //   SERVER=node ...                   the host is the headless dedicated server
 //                                     (tools/server/run-server.mjs) instead of a page;
 //                                     SERVER_BIN=<dir> picks its build
@@ -25,7 +27,10 @@ const extra = (process.env.NETRTC ? '&netrtc' : '') + ['netlag', 'netjitter', 'n
 // The client profile gets the game files from the local server on first use.
 const contexts = [];
 const browserFor = async (profile) => {
-  const ctx = await chromium.launchPersistentContext(new URL(`./${profile}/`, import.meta.url).pathname, {
+  // PROFILES=<dir>: where the extra players' browser profiles live (each
+  // imports its own ~2 GB copy of the game); default next to this script.
+  const dir = profile !== 'profile' && process.env.PROFILES ? `${process.env.PROFILES}/${profile}/` : new URL(`./${profile}/`, import.meta.url).pathname;
+  const ctx = await chromium.launchPersistentContext(dir, {
     channel: 'chromium', headless: true, viewport: { width: 1024, height: 768 },
     args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required',
       '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
@@ -58,7 +63,8 @@ async function player(name, profile) {
   // CLIENT_BASE: the first client from another build (e.g. /dbg/ for its logs).
   const from = name === 'client' && process.env.CLIENT_BASE ? process.env.CLIENT_BASE : base;
   const args = name !== 'host' && process.env.JOIN === 'connect' ? `&args=${encodeURIComponent(`+connect 10.0.0.1:4848 +netplayername ${p.nick}`)}` : '';
-  await page.goto(`${from}?nolock${from === base ? '&quiet' : ''}&noguard&name=${p.nick}&net=${encodeURIComponent(net)}${extra}${args}`);
+  const where = process.env.ONLINE ? `&online=${encodeURIComponent(process.env.ONLINE)}` : `&net=${encodeURIComponent(net)}`;
+  await page.goto(`${from}?nolock${from === base ? '&quiet' : ''}&noguard&name=${p.nick}${where}${extra}${args}`);
   await page.waitForSelector('#start:not([hidden])', { timeout: 900000 });
   // HOST_PLAYS=1: the page host also plays (the install's default host
   // settings, Data/svrcfg_cnc.ini, say IsDedicated=yes). Edits this
@@ -75,7 +81,7 @@ async function player(name, profile) {
       return 'host: IsDedicated=no';
     }));
   }
-  await page.evaluate(() => setTimeout(() => document.getElementById('start').click(), 0));
+  await page.evaluate((online) => setTimeout(() => document.getElementById(online ? 'online' : 'start').click(), 0), !!process.env.ONLINE);
   p.skipper = setInterval(() => page.evaluate(() => { if (window.rebelMovieActive) Module.rebelStopMovie(); }).catch(() => {}), 500);
   while (!p.menuAt) {
     if (p.crashed) throw new Error(name + ' crashed while starting');
@@ -158,7 +164,9 @@ async function join(c) {
 const netStats = async (p) => (p.proc ? null : p.page.evaluate(() => JSON.stringify(Module.rebelNet.stats)));
 try {
   let host;
-  if (process.env.SERVER === 'node') {
+  if (process.env.ONLINE) {
+    host = { name: 'matchmaker', lines: [], page: { screenshot: async () => {} } };
+  } else if (process.env.SERVER === 'node') {
     host = await nodeServer();
     players.push(host);
   } else {
@@ -173,13 +181,20 @@ try {
   }
   // C&C gameplay starts once both teams have a player: a dedicated server
   // needs two clients.
-  const count = +(process.env.CLIENTS || (host.proc ? 2 : 1));
+  const count = +(process.env.CLIENTS || (host.proc || process.env.ONLINE ? 2 : 1));
   const clients = [];
-  for (let i = 0; i < count; i++) {
-    const c = await player(i ? `client${i + 1}` : 'client', ['profile-b', 'profile-c', 'profile-d'][i]);
-    players.push(c);
-    clients.push(c);
-    if (process.env.JOIN !== 'connect') await join(c);
+  const names = (i) => [i ? `client${i + 1}` : 'client', ['profile-b', 'profile-c', 'profile-d'][i]];
+  if (process.env.ONLINE) {
+    // Everyone queues at once (the matchmaker needs them together).
+    clients.push(...(await Promise.all([...Array(count).keys()].map((i) => player(...names(i))))));
+    players.push(...clients);
+  } else {
+    for (let i = 0; i < count; i++) {
+      const c = await player(...names(i));
+      players.push(c);
+      clients.push(c);
+      if (process.env.JOIN !== 'connect') await join(c);
+    }
   }
   // SERVER_CMDS="a;b": console commands for the Node server once everyone joined.
   if (host.proc && process.env.SERVER_CMDS) host.proc.stdin.write(process.env.SERVER_CMDS.split(';').join('\n') + '\n');
