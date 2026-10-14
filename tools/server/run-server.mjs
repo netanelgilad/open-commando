@@ -33,6 +33,9 @@ const { values: opt } = parseArgs({
     bin: { type: 'string', default: join(engine, 'build/wasm-release/bin') },
     work: { type: 'string', default: '/tmp/rebel-server' },
     map: { type: 'string', default: 'C&C_Field.mix' },
+    // With a lobby (local-service.mjs): --map is the warmup map and the
+    // rotation continues to --next-map, the match itself.
+    'next-map': { type: 'string' },
     players: { type: 'string', default: '16' },
     name: { type: 'string', default: 'Open Commando' },
     port: { type: 'string', default: '4848' },
@@ -85,7 +88,8 @@ writeFileSync(join(game, 'Data', 'svrcfg_open.ini'), `[Settings]
 ConfigName=Open Commando
 MapName=${opt.map}
 MapName00=${opt.map}
-TimeLimitMinutes=${opt.minutes}
+${opt['next-map'] ? `MapName01=${opt['next-map']}
+` : ''}TimeLimitMinutes=${opt.minutes}
 RadarMode=1
 IsAutoRestart=yes
 IsPassworded=no

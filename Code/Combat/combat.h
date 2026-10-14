@@ -181,6 +181,11 @@ public:
   static void On_Soldier_Death(SoldierGameObj *p_soldier);
   static bool Is_Gameplay_Permitted(void);
 
+  // Warmup (the online lobby): players fight and respawn, but buildings
+  // can't be damaged and only a manual "gameover" ends the game.
+  static void Set_Warmup(bool on) { IsWarmup = on; }
+  static bool Is_Warmup(void) { return IsWarmup; }
+
   // Misc Handler
   static void Set_Combat_Misc_Handler(CombatMiscHandlerClass *handler) { MiscHandler = handler; }
   static void Mission_Complete(bool success);
@@ -308,6 +313,7 @@ private:
   static bool HitReticleEnabled;
 
   static bool IsGameplayPermitted;
+  static bool IsWarmup;
 
   /*
   ** Combat Mode Management

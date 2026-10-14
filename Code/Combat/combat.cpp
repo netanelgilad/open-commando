@@ -139,6 +139,7 @@ bool CombatManager::FriendlyFirePermitted = false;
 bool CombatManager::BeaconPlacementEndsGame = false;
 bool CombatManager::HitReticleEnabled = true;
 bool CombatManager::IsGameplayPermitted = false;
+bool CombatManager::IsWarmup = false;
 
 int CombatManager::CombatMode = CombatManager::COMBAT_MODE_NONE;
 int CombatManager::ReloadCount = 0;

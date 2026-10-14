@@ -34,9 +34,17 @@ where the shortcut lives and what "done" looks like.
 
 - **WCHAR is 4 bytes in memory, 2 on disk/wire.** UTF-16 is converted at the
   chunk macros (`WWLib/chunkio.h`), translation objects, registry and
-  `BitStreamClass` wide chars. Any other place that reads/writes raw WCHAR
-  bytes (none found yet) would need the same treatment. Characters outside
-  the BMP are written as '?'.
+  `BitStreamClass` wide chars, and INI wide strings (`INIClass::Put/
+  Get_Wide_String`, which stored raw wchar_t memory until the multiplayer
+  host options crashed on it). Any other place that reads/writes raw WCHAR
+  bytes would need the same treatment. Characters outside the BMP are
+  written as '?'.
+- **Wide printf uses Windows' conventions** (`%s`/`%c` wide): the engine's
+  `_vsnwprintf`/`_snwprintf` go through `Rebel_vsnwprintf`
+  (`Platform/win32/win32_wprintf.cpp`), which rewrites formats for POSIX
+  `vswprintf` (before, every wide `%s` showed one character: "T: 0" for
+  "Time Remaining", chat as "H: L"). Direct `swprintf` calls with `%s` need
+  the same (two in `bandwidthcheck.cpp` were switched).
 
 ## Networking
 

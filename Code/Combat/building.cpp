@@ -462,6 +462,11 @@ void BuildingGameObj::Apply_Damage(const OffenseObjectClass &damager, float scal
   if (!CombatManager::Is_Gameplay_Permitted()) {
     return;
   }
+
+  // Warmup lobby: bases can't be destroyed.
+  if (CombatManager::Is_Warmup()) {
+    return;
+  }
   //
   // TSS102501
   //

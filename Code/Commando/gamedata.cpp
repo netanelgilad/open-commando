@@ -80,6 +80,7 @@
 #include "dialogmgr.h"
 #include "rawfile.h"
 #include "consolemode.h"
+#include "combat.h"
 #include "gamedataupdateevent.h"
 #include "stylemgr.h"
 #include "modpackagemgr.h"
@@ -1362,6 +1363,13 @@ bool cGameData::Is_Game_Over(void) {
   if (!is_game_over && IsManualExit) {
     WinType = WIN_TYPE_FORCED;
     is_game_over = true;
+  }
+
+  //
+  // Warmup lobby: only "gameover" (or quit) ends it.
+  //
+  if (!is_game_over && CombatManager::Is_Warmup()) {
+    return false;
   }
 
   //

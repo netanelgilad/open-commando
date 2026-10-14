@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // The datagram hub (services/hub) as a plain Node WebSocket server: same
 // protocol (web/net.js frames, {"type":"hello"} address assignment, routing
-// by destination address, sender stamped by the hub). For local tests
-// without wrangler, and to compare against the Durable Object.
+// by destination address, sender stamped by the hub; the match server,
+// ?role=server, is always 10.0.0.1; WebRTC signalling forwarded). For local
+// tests without wrangler, and the local match service (local-service.mjs).
 //
 //   node tools/server/net-hub.mjs [--port 8790]   ->  ws://127.0.0.1:8790/room/<name>
 import { WebSocketServer } from 'ws';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
-const { values: opt } = parseArgs({ options: { port: { type: 'string', default: '8790' } } });
 const KIND_DATAGRAM = 1;
 const HEADER = 13;
 const BROADCAST = 0xffffffff;
@@ -19,46 +20,55 @@ const ipFromString = (s) => {
 };
 const addressFor = (n) => (10 | ((n >> 8) << 16) | ((n & 255) << 24)) >>> 0; // 10.0.x.y
 
-const rooms = new Map(); // name -> Map(address -> ws)
-const wss = new WebSocketServer({ port: +opt.port, host: '127.0.0.1' });
-wss.on('connection', (ws, req) => {
-  const url = new URL(req.url, 'ws://hub');
-  const m = /^\/room\/([\w-]{1,64})$/.exec(url.pathname);
-  if (!m) return ws.close(1008, 'not found');
-  let room = rooms.get(m[1]);
-  if (!room) rooms.set(m[1], (room = new Map()));
-  // The match server (?role=server) is always 10.0.0.1.
-  const isServer = url.searchParams.get('role') === 'server';
-  if (isServer && room.has(addressFor(1))) return ws.close(1008, 'room already has a server');
-  let n = isServer ? 1 : 2;
-  while (!isServer && room.has(addressFor(n))) n++;
-  const ip = addressFor(n);
-  room.set(ip, ws);
-  ws.send(JSON.stringify({ type: 'hello', address: ipToString(ip) }));
-  ws.on('message', (data, isBinary) => {
-    if (!isBinary) {
-      // WebRTC signalling between endpoints, forwarded with the sender stamped.
-      let m;
-      try { m = JSON.parse(data.toString()); } catch { return; }
-      if (m.type !== 'signal' || typeof m.to !== 'string') return;
-      const peer = room.get(ipFromString(m.to));
-      if (!peer) return;
-      m.from = ipToString(ip);
-      delete m.to;
-      return peer.send(JSON.stringify(m));
-    }
-    if (data.length < HEADER || data[0] !== KIND_DATAGRAM) return;
-    data.writeUInt32LE(ip, 7);
-    const to = data.readUInt32LE(1);
-    if (to === BROADCAST) {
-      for (const [a, peer] of room) if (a !== ip) peer.send(data);
-    } else {
-      room.get(to)?.send(data);
-    }
-  });
-  ws.on('close', () => {
-    room.delete(ip);
-    if (!room.size) rooms.delete(m[1]);
-  });
-});
-console.log(`hub on ws://127.0.0.1:${opt.port}/room/<name>`);
+// Rooms on a WebSocketServer (noServer mode: call handleUpgrade yourself, or
+// let listen() own the port). Returns { rooms, accept(ws, url) }.
+export function createHub() {
+  const rooms = new Map(); // name -> Map(address -> ws)
+  const accept = (ws, url) => {
+    const m = /^\/room\/([\w-]{1,64})$/.exec(url.pathname);
+    if (!m) return ws.close(1008, 'not found');
+    let room = rooms.get(m[1]);
+    if (!room) rooms.set(m[1], (room = new Map()));
+    const isServer = url.searchParams.get('role') === 'server';
+    if (isServer && room.has(addressFor(1))) return ws.close(1008, 'room already has a server');
+    let n = isServer ? 1 : 2;
+    while (!isServer && room.has(addressFor(n))) n++;
+    const ip = addressFor(n);
+    room.set(ip, ws);
+    ws.send(JSON.stringify({ type: 'hello', address: ipToString(ip) }));
+    ws.on('message', (data, isBinary) => {
+      if (!isBinary) {
+        // WebRTC signalling between endpoints, forwarded with the sender stamped.
+        let msg;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
+        if (msg.type !== 'signal' || typeof msg.to !== 'string') return;
+        const peer = room.get(ipFromString(msg.to));
+        if (!peer) return;
+        msg.from = ipToString(ip);
+        delete msg.to;
+        return peer.send(JSON.stringify(msg));
+      }
+      if (data.length < HEADER || data[0] !== KIND_DATAGRAM) return;
+      data.writeUInt32LE(ip, 7);
+      const to = data.readUInt32LE(1);
+      if (to === BROADCAST) {
+        for (const [a, peer] of room) if (a !== ip) peer.send(data);
+      } else {
+        room.get(to)?.send(data);
+      }
+    });
+    ws.on('close', () => {
+      room.delete(ip);
+      if (!room.size) rooms.delete(m[1]);
+    });
+  };
+  return { rooms, accept };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const { values: opt } = parseArgs({ options: { port: { type: 'string', default: '8790' } } });
+  const hub = createHub();
+  const wss = new WebSocketServer({ port: +opt.port, host: '127.0.0.1' });
+  wss.on('connection', (ws, req) => hub.accept(ws, new URL(req.url, 'ws://hub')));
+  console.log(`hub on ws://127.0.0.1:${opt.port}/room/<name>`);
+}

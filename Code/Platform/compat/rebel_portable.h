@@ -71,8 +71,17 @@
 #define _strnicmp strncasecmp
 #define _vsnprintf vsnprintf
 #define _snprintf snprintf
-#define _vsnwprintf vswprintf
-#define _snwprintf swprintf
+// Wide printf with Windows' meaning of %s/%c (wide); win32/win32_wprintf.cpp.
+#ifdef __cplusplus
+extern "C" {
+#endif
+int Rebel_vsnwprintf(wchar_t *buffer, size_t count, const wchar_t *format, va_list args);
+int Rebel_snwprintf(wchar_t *buffer, size_t count, const wchar_t *format, ...);
+#ifdef __cplusplus
+}
+#endif
+#define _vsnwprintf Rebel_vsnwprintf
+#define _snwprintf Rebel_snwprintf
 #define _strdup strdup
 #define _wcsdup wcsdup
 #define _wcsicmp wcscasecmp

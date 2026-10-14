@@ -626,7 +626,7 @@ wchar_t *BandwidthCheckerClass::Get_Bandwidth_As_String(void) {
   if (cUserOptions::Get_Bandwidth_Type() == BANDWIDTH_AUTO) {
     const size_t array_size = 256;
     static wchar_t _build_string[array_size];
-    swprintf(_build_string, array_size, L"%s,%s", DownstreamBandwidthString, UpstreamBandwidthString);
+    _snwprintf(_build_string, array_size, L"%s,%s", DownstreamBandwidthString, UpstreamBandwidthString);
     return (_build_string);
   } else {
     return (wchar_t *)cBandwidth::Get_Bandwidth_String_From_Type(
@@ -655,7 +655,7 @@ wchar_t *BandwidthCheckerClass::Get_Bandwidth_As_String(PackedBandwidthType band
   assert(bandwidth.Bandwidth.Up < NUM_BANDS + 1);
   assert(bandwidth.Bandwidth.Down < NUM_BANDS + 1);
 
-  swprintf(_build_string, array_size, L"%s,%s", BandwidthNames[bandwidth.Bandwidth.Down],
+  _snwprintf(_build_string, array_size, L"%s,%s", BandwidthNames[bandwidth.Bandwidth.Down],
            BandwidthNames[bandwidth.Bandwidth.Up]);
   return (_build_string);
 }

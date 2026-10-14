@@ -611,23 +611,6 @@ public:
   }
 };
 
-class SuicideConsoleFunctionClass : public ConsoleFunctionClass {
-public:
-  virtual const char *Get_Name(void) { return "suicide"; }
-  virtual const char *Get_Help(void) { return "SUICIDE - kill your commando."; }
-  virtual void Activate(const char *input) {
-    if (cNetwork::I_Am_Client()) {
-      Print("Committing suicide.\n");
-
-      cSuicideEvent *p_suicide = new cSuicideEvent;
-      p_suicide->Init();
-
-    } else {
-      Print("Only clients can commit suicide.\n");
-    }
-  }
-};
-
 class ShadowAttenuationConsoleFunctionClass : public ConsoleFunctionClass {
   virtual const char *Get_Name(void) { return "shadow_attenuation"; }
   virtual const char *Get_Help(void) {
@@ -3287,6 +3270,43 @@ public:
   }
 };
 
+class SuicideConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  virtual const char *Get_Name(void) { return "suicide"; }
+  virtual const char *Get_Help(void) { return "SUICIDE - kill your commando."; }
+  virtual void Activate(const char *input) {
+    if (cNetwork::I_Am_Client()) {
+      Print("Committing suicide.\n");
+
+      cSuicideEvent *p_suicide = new cSuicideEvent;
+      p_suicide->Init();
+
+    } else {
+      Print("Only clients can commit suicide.\n");
+    }
+  }
+};
+
+// The online lobby (tools/server/run-server.mjs): players fight and respawn
+// while the match fills; buildings can't be damaged and the game only ends
+// with "gameover", which starts the real match on the next map.
+class WarmupConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  virtual const char *Get_Name(void) { return "warmup"; }
+  virtual const char *Get_Help(void) { return "WARMUP [on|off] - lobby mode: no base damage, no game end (server only)."; }
+  virtual void Activate(const char *input) {
+    if (!cNetwork::I_Am_Server()) {
+      Print("WARMUP is for the server only\n");
+      return;
+    }
+    if (input && strstr(input, "on"))
+      CombatManager::Set_Warmup(true);
+    else if (input && strstr(input, "off"))
+      CombatManager::Set_Warmup(false);
+    ConsoleBox.Print("Warmup %s\n", CombatManager::Is_Warmup() ? "on" : "off");
+  }
+};
+
 class ToggleSortingConsoleFunctionClass : public ConsoleFunctionClass {
 public:
   virtual const char *Get_Name(void) { return "toggle_sorting"; }
@@ -4952,7 +4972,6 @@ void ConsoleFunctionManager::Init(void) {
   FunctionList.Add(new StarVisibilityConsoleFunctionClass());
   FunctionList.Add(new StatsConsoleFunctionClass());
   // FunctionList.Add( new StealthConsoleFunctionClass() );
-  FunctionList.Add(new SuicideConsoleFunctionClass());
   FunctionList.Add(new SurfaceEffectsDebugConsoleFunctionClass());
   FunctionList.Add(new SurfaceTypeOverrideConsoleFunctionClass());
   FunctionList.Add(new SurfacePhysicsOverrideConsoleFunctionClass());
@@ -5012,6 +5031,10 @@ void ConsoleFunctionManager::Init(void) {
   //
 
   FunctionList.Add(new GameOverConsoleFunctionClass());
+  FunctionList.Add(new WarmupConsoleFunctionClass());
+  // A player command in our builds (development-only in the original): the
+  // online lobby respawns you, and it gets you out of a stuck spot.
+  FunctionList.Add(new SuicideConsoleFunctionClass());
   FunctionList.Add(new AdminMessageConsoleFunctionClass());
   FunctionList.Add(new GameInfoConsoleFunctionClass());
   FunctionList.Add(new KickConsoleFunctionClass());

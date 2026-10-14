@@ -285,3 +285,53 @@ matches from the oldest ticket, ping limit growing +20 ms per 10 s waited
 (60 -> 150 ms), start at 8 humans or after 45 s with bots filling to 8
 (never for one player alone), teams balanced by summed skill with parties
 kept whole.
+
+## S9: the lobby (warmup) and the match, locally
+
+Goal: two players press Play online, land in a lobby where they can fight
+and respawn while it fills, and wait there until the match starts.
+
+The shipped engine only has C&C mode (Deathmatch and Team Deathmatch were
+cut: commented out in `cGameData::Create_Game_Of_Type`, no source, no DM
+maps), but C&C already respawns players. So the lobby is a C&C map in
+**warmup**:
+
+- Engine: `CombatManager::Set_Warmup` and the server console command
+  `warmup on|off`: buildings take no damage and the game can only end by
+  `gameover` (no time limit, base destruction or "gameplay pending" end).
+  Players spawn on both teams, fight and respawn.
+- `suicide` (development-only in the original) is a player command in our
+  builds.
+- `services/match/src/lobby.js` (pure, unit-tested): lobby -> countdown ->
+  live. Starts when full (`startPlayers`) or once it has had `minPlayers`
+  (2) for `lobbyWaitMs`; a countdown that a leaving player cancels; status
+  lines in the chat (`msg`; `amsg` is a modal popup, unusable here).
+- Start: `warmup off` + `gameover`: the engine's own end of game, score
+  screen and map rotation move every connected client to the match map
+  (`--next-map`); no page reload. After the match the rotation returns to
+  the lobby map and warmup goes back on.
+- `tools/server/local-service.mjs`: the online service on this machine
+  (matchmaker queue, hub rooms, a `run-server.mjs` process per match, lobby
+  ticks): what services/match does with Durable Objects and containers.
+  Players are placed at once: into a new match, or backfilled into one still
+  in its lobby (or early in play).
+- Test: `ONLINE=http://127.0.0.1:8790 node lan.mjs` with
+  `node tools/server/local-service.mjs --lobby-wait 60 --start-players 4`:
+
+```
+Charlie queued / Bravo queued
+new match m0azvnt (lobby C&C_Field.mix, then C&C_Volcano.mix)
+Bravo -> m0azvnt (joins the booting match)          backfill
+Loading level C&C_Field.mix / Warmup on
+Player Charlie joined the game / Player Bravo joined the game
+client suicide in the lobby: 20.57 -16.26 -> respawned at 83.38 -25.68
+match starts (2 players) / Warmup off / Loading level C&C_Volcano.mix
+client in the match: 95.07 -50.85 -3.44   client2 in the match: -47.49 93.02 -3.48
+```
+
+- Found on the way: **wide printf `%s`**. The compat layer mapped
+  `_vsnwprintf` to POSIX `vswprintf`, where `%s` means a narrow string
+  (Windows: wide), so every wide `Format` with `%s` stopped after one
+  character: the HUD's "Time Remaining" showed as "T: 0", chat lines as
+  "H: L". `Rebel_vsnwprintf` (Platform/win32/win32_wprintf.cpp) rewrites
+  Windows format spellings to POSIX ones first.

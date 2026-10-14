@@ -40,7 +40,7 @@ const browserFor = async (profile) => {
 };
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
-const NETWORK = /\[net\]|\[debug\]|abort|Assert|RuntimeError|PAGEERROR|cNetwork|cConnection|[Cc]onnect|[Ss]erver|[Cc]lient|LAN|refus|Accept|Bound|socket|WSA/;
+const NETWORK = /suicide|Lobby|Match starting|\[net\]|\[debug\]|abort|Assert|RuntimeError|PAGEERROR|cNetwork|cConnection|[Cc]onnect|[Ss]erver|[Cc]lient|LAN|refus|Accept|Bound|socket|WSA/;
 
 async function player(name, profile) {
   const ctx = await browserFor(profile);
@@ -217,6 +217,50 @@ try {
     console.log(`${stamp()} ${c.name} star: ${before} -> ${c.star}`);
   }
   for (const p of players) await shot(p, 'joined');
+  // ONLINE: they're in the lobby (warmup); wait for the service to start the
+  // match and the server to change map, then check both are in it.
+  if (process.env.ONLINE) {
+    const status = async () => (await fetch(process.env.ONLINE.replace(/\/$/, '') + '/status')).json();
+    let s = await status();
+    console.log(`${stamp()} service: ${JSON.stringify(s.matches)}`);
+    // In the lobby: the status message shows in the chat; a soldier that dies
+    // respawns (C&C respawns; warmup keeps bases safe).
+    if (s.matches[0]?.lobby?.state !== 'live') {
+      await clients[0].page.waitForTimeout(16000);
+      for (const c of clients) await shot(c, 'lobby');
+      const c = clients[0];
+      // Walk away from the spawn point first, so a respawn is visible.
+      await c.page.mouse.click(512, 384);
+      await c.page.keyboard.down('KeyW');
+      await c.page.waitForTimeout(4000);
+      await c.page.keyboard.up('KeyW');
+      await dump(c);
+      await c.page.waitForTimeout(1500);
+      const before = c.star;
+      await c.page.evaluate(() => setTimeout(() => Module.ccall('Rebel_Console_Command', null, ['string'], ['suicide']), 0));
+      await c.page.waitForTimeout(3000);
+      c.star = null;
+      for (let i = 0; i < 12 && !c.star; i++) { await c.page.waitForTimeout(2500); await dump(c); }
+      console.log(`${stamp()} ${c.name} suicide in the lobby: ${before} -> respawned at ${c.star}`);
+      await shot(c, 'respawned');
+    }
+    for (let i = 0; i < 60; i++) {
+      s = await status();
+      const m = s.matches[0];
+      if (m && m.lobby?.state === 'live' && m.map === s.matchMap) break;
+      if (i % 3 === 0) console.log(`${stamp()} waiting in the lobby: ${JSON.stringify(m && { map: m.map, lobby: m.lobby })}`);
+      await clients[0].page.waitForTimeout(5000);
+    }
+    console.log(`${stamp()} service: ${JSON.stringify(s.matches)}`);
+    // Everyone loads the match map and respawns there.
+    for (const c of clients) c.star = null;
+    for (let i = 0; i < 36 && clients.some((c) => !c.star); i++) {
+      await clients[0].page.waitForTimeout(5000);
+      for (const c of clients) await dump(c);
+    }
+    for (const c of clients) console.log(`${stamp()} ${c.name} in the match: ${c.star}`);
+    for (const p of players) await shot(p, 'match');
+  }
   for (const p of players) console.log(`${stamp()} ${p.name} star: ${p.star} net ${await netStats(p)}`);
   if (host.proc) console.log(`${stamp()} server process: ${execFileSync('ps', ['-o', 'time=,rss=', '-p', String(host.proc.pid)]).toString().trim()} (cpu time, rss KB)`);
   if (clients.some((c) => !c.star)) process.exitCode = 1;
