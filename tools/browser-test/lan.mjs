@@ -271,4 +271,6 @@ try {
 }
 save();
 for (const p of players) if (p.proc) p.proc.kill();
-for (const c of contexts) await c.close();
+// Closing a browser can hang (pages mid-game); don't let it hold the run.
+await Promise.race([Promise.all(contexts.map((c) => c.close())), new Promise((r) => setTimeout(r, 15000))]);
+process.exit(process.exitCode || 0);
