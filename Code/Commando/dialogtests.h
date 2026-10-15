@@ -77,6 +77,11 @@ public:
   //	Static accessors
   //
   static bool Is_Complete(void) { return IsComplete; }
+#ifdef REBEL_PORTABLE
+  // A runtime join (the online front screen) never shows this splash, which
+  // the GameSpy launch path waits for.
+  static void Set_Complete(bool done) { IsComplete = done; }
+#endif
 
 private:
   ////////////////////////////////////////////////////////////////

@@ -24,6 +24,7 @@ import { WebSocketServer } from 'ws';
 import { createHub } from './net-hub.mjs';
 import { pass } from '../../services/match/src/matchmaker.js';
 import { lobbyTick } from '../../services/match/src/lobby.js';
+import { LOBBY_MAP, pickMatchMap } from '../../services/match/src/maps.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const { values: opt } = parseArgs({
@@ -33,8 +34,8 @@ const { values: opt } = parseArgs({
     'min-players': { type: 'string', default: '2' },
     'lobby-wait': { type: 'string', default: '90' },
     countdown: { type: 'string', default: '10' },
-    'lobby-map': { type: 'string', default: 'C&C_Field.mix' },
-    map: { type: 'string', default: 'C&C_Volcano.mix' },
+    'lobby-map': { type: 'string', default: LOBBY_MAP },
+    map: { type: 'string' }, // default: a random C&C map per match
     bin: { type: 'string' },
   },
 });
@@ -53,7 +54,7 @@ const matches = new Map(); // id -> { id, teams, startedAt, durationMs, maxPlaye
 
 function startServer(match) {
   const args = [join(here, 'run-server.mjs'), '--net', `ws://127.0.0.1:${opt.port}/room/${match.id}`,
-    '--map', opt['lobby-map'], '--next-map', opt.map, '--work', `/tmp/rebel-server-${match.id}`, '--name', `Open Commando ${match.id}`];
+    '--map', opt['lobby-map'], '--next-map', match.matchMap, '--work', `/tmp/rebel-server-${match.id}`, '--name', `Open Commando ${match.id}`];
   if (opt.bin) args.push('--bin', opt.bin);
   const proc = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   match.proc = proc;
@@ -127,9 +128,9 @@ setInterval(() => {
   }
   for (const nm of newMatches) {
     const id = 'm' + Math.random().toString(36).slice(2, 8);
-    const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: 30 * 60000, maxPlayers: 16, players: new Set(), waiting: [], lobby: null, ready: false };
+    const match = { matchMap: opt.map || pickMatchMap(), id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: 30 * 60000, maxPlayers: 16, players: new Set(), waiting: [], lobby: null, ready: false };
     matches.set(id, match);
-    log(`new match ${id}, starting its server (lobby ${opt['lobby-map']}, then ${opt.map})`);
+    log(`new match ${id}, starting its server (lobby ${opt['lobby-map']}, then ${match.matchMap})`);
     startServer(match);
     for (const tid of nm.tickets) {
       const e = tickets.get(tid);
@@ -165,8 +166,7 @@ const http = createServer((req, res) => {
     return res.end(JSON.stringify({
       queue: [...tickets.values()].map((e) => e.ticket.players[0].name),
       lobbyMap: opt['lobby-map'],
-      matchMap: opt.map,
-      matches: [...matches.values()].map((m) => ({ id: m.id, map: m.map, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: [...m.players] })),
+      matches: [...matches.values()].map((m) => ({ id: m.id, map: m.map, matchMap: m.matchMap, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: [...m.players] })),
     }, null, 2));
   }
   res.writeHead(404);

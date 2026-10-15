@@ -260,7 +260,7 @@ try {
     for (let i = 0; i < 60; i++) {
       s = await status();
       const m = s.matches[0];
-      if (m && m.lobby?.state === 'live' && m.map === s.matchMap) break;
+      if (m && m.lobby?.state === 'live' && m.map === m.matchMap) break;
       if (i % 3 === 0) console.log(`${stamp()} waiting in the lobby: ${JSON.stringify(m && { map: m.map, lobby: m.lobby })}`);
       await clients[0].page.waitForTimeout(5000);
     }

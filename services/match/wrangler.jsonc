@@ -1,31 +1,68 @@
-// Match service: a room hub (the Room Durable Object from services/hub) plus
-// the match server in a Cloudflare Container, owned by a MatchServer Durable
-// Object per match. The server dials into its room as 10.0.0.1.
+// Match service: per region, a matchmaker, match rooms (the Room Durable
+// Object from services/hub) and match servers in Cloudflare Containers. The
+// server dials into its room as 10.0.0.1. See src/index.js.
 //   tools/build-server-image.sh && npx wrangler deploy
 {
   "name": "open-commando-match",
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
+  // One container class per region (same image): placement constraints are
+  // per container application.
   "containers": [
     {
-      "class_name": "MatchServer",
+      "class_name": "MatchServerWEUR",
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
       "instance_type": "basic",
-      "max_instances": 3
+      "max_instances": 2,
+      "constraints": { "regions": ["WEUR"] }
+    },
+    {
+      "class_name": "MatchServerEEUR",
+      "image": "../../build/match-image/Dockerfile",
+      "image_build_context": "../../build/match-image",
+      "instance_type": "basic",
+      "max_instances": 2,
+      "constraints": { "regions": ["EEUR"] }
+    },
+    {
+      "class_name": "MatchServerENAM",
+      "image": "../../build/match-image/Dockerfile",
+      "image_build_context": "../../build/match-image",
+      "instance_type": "basic",
+      "max_instances": 2,
+      "constraints": { "regions": ["ENAM"] }
+    },
+    {
+      "class_name": "MatchServerWNAM",
+      "image": "../../build/match-image/Dockerfile",
+      "image_build_context": "../../build/match-image",
+      "instance_type": "basic",
+      "max_instances": 2,
+      "constraints": { "regions": ["WNAM"] }
     }
   ],
   "durable_objects": {
     "bindings": [
       { "name": "ROOMS", "class_name": "Room" },
-      { "name": "MATCH_SERVER", "class_name": "MatchServer" },
-      { "name": "MATCHMAKER", "class_name": "Matchmaker" }
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" },
+      { "name": "PING", "class_name": "Ping" },
+      { "name": "MATCH_SERVER_WEUR", "class_name": "MatchServerWEUR" },
+      { "name": "MATCH_SERVER_EEUR", "class_name": "MatchServerEEUR" },
+      { "name": "MATCH_SERVER_ENAM", "class_name": "MatchServerENAM" },
+      { "name": "MATCH_SERVER_WNAM", "class_name": "MatchServerWNAM" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "MatchServer", "Matchmaker"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room", "MatchServer", "Matchmaker"] },
+    {
+      "tag": "v2",
+      "renamed_classes": [{ "from": "MatchServer", "to": "MatchServerWEUR" }],
+      "new_sqlite_classes": ["MatchServerEEUR", "MatchServerENAM", "MatchServerWNAM", "Ping"]
+    }
+  ],
   "vars": {
     "PUBLIC_WSS": "wss://open-commando-match.netanelgilad.workers.dev",
-    "REGION": "WEUR",
     // Lobby: a match starts at START_PLAYERS, or once it has had MIN_PLAYERS
     // for LOBBY_WAIT_S (spike values; the plan says 8 / 2 / 90).
     "START_PLAYERS": "4",

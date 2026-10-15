@@ -38,6 +38,9 @@
 
 #include "buildinfo.h"
 #include "dlgmainmenu.h"
+#ifdef REBEL_PORTABLE
+#include "showroom_web.h"
+#endif
 #include "assetmgr.h"
 #include "rendobj.h"
 #include "hanim.h"
@@ -381,6 +384,17 @@ void MainMenuDialogClass::On_Command(int ctrl_id, int message_id, DWORD param) {
   return;
 }
 
+#ifdef REBEL_PORTABLE
+void MainMenuDialogClass::Render(void) {
+  if (Rebel_Showroom_Active()) {
+    if (ActiveMenu == this || DialogMgrClass::Peek_Transitioning_Dialog() == this)
+      Rebel_Showroom_Render();
+    return;
+  }
+  MenuDialogClass::Render();
+}
+#endif
+
 ////////////////////////////////////////////////////////////////
 //
 //	Display
@@ -423,6 +437,10 @@ void MainMenuDialogClass::Display(void) {
 #ifdef REBEL_PORTABLE
     // Tagged and unconditional: the page tests wait for it in release builds too.
     fprintf(stderr, "[rebel] MainMenuDialogClass: started\n");
+    if (Rebel_Showroom_Startup) {
+      Rebel_Showroom_Startup = false;
+      Rebel_Showroom_Enter_Now();
+    }
 #endif
     REF_PTR_RELEASE(dialog);
 

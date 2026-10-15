@@ -27,6 +27,17 @@
   progress { width: min(480px, 80vw); height: 10px; }
   button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid #555; background: #1c1c1c; color: #eee; cursor: pointer; }
   button:hover { background: #2a2a2a; }
+  /* The showroom: the 3D scene shows through; title top-left, controls
+     bottom-right (web/rebel.js adds body.showroom once the scene is up). */
+  body.showroom #overlay { background: linear-gradient(90deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 22%), linear-gradient(0deg, rgba(0,0,0,.75) 0%, rgba(0,0,0,0) 26%); justify-content: flex-end; align-items: flex-end; padding: 40px 56px; text-align: right; }
+  body.showroom #overlay h1 { position: absolute; top: 36px; left: 48px; font-size: 34px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
+  body.showroom #about { position: absolute; left: 48px; bottom: 36px; max-width: 420px; text-align: left; color: #9a9a9a; }
+  body.showroom #hint { display: none; }
+  body.showroom #status { font-size: 16px; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,.8); min-height: 1.4em; }
+  body.showroom #online { font-size: 22px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 16px 44px; background: #f2c200; border-color: #f2c200; color: #111; }
+  body.showroom #online:hover { background: #ffd633; }
+  body.showroom #start { background: rgba(20,20,20,.75); }
+  body.showroom #nick { background: rgba(10,10,10,.75); }
   #play { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
   #play [hidden] { display: none; }
   #nick { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid #555; background: #111; color: #eee; width: 11em; }

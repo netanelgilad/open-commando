@@ -242,7 +242,15 @@ void MovieGameModeClass::HandleNotification(CDVerifyEvent &event) {
   return;
 }
 
+#ifdef REBEL_PORTABLE
+#include "showroom_web.h"
+#endif
+
 void MovieGameModeClass::Startup_Movies(void) {
+#ifdef REBEL_PORTABLE
+  if (Rebel_Showroom_Startup)
+    SkipAllIntroMovies = true; // straight to the online front screen
+#endif
   if (SkipAllIntroMovies) {
     MovieStartupMode = STARTUP_MOVIE_INTRO;
     MovieGameModeClass::Movie_Done();

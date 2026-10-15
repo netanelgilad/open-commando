@@ -16,17 +16,17 @@
 import { DurableObject } from 'cloudflare:workers';
 import { pass } from './matchmaker.js';
 import { lobbyTick } from './lobby.js';
+import { LOBBY_MAP, pickMatchMap } from './maps.js';
+import { REGIONS } from './regions.js';
 
 const MATCH_MINUTES = 30;
-const LOBBY_MAP = 'C&C_Field.mix';
-const MATCH_MAP = 'C&C_Volcano.mix';
 
 export class Matchmaker extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.tickets = new Map(); // ticket id -> { ticket, ws }
     this.matches = new Map(); // match id -> { ...match for pass(), lobby, ready, waiting, players }
-    this.region = env.REGION || 'WEUR';
+    this.region = null; // set by the first request (?region=), see index.js
     this.lobbyConfig = {
       startPlayers: +(env.START_PLAYERS || 8),
       minPlayers: +(env.MIN_PLAYERS || 2),
@@ -37,13 +37,15 @@ export class Matchmaker extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
+    this.region ??= REGIONS[url.searchParams.get('region')] ? url.searchParams.get('region') : 'weur';
     if (url.pathname === '/status') return Response.json(this.status());
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();
     const id = crypto.randomUUID();
     const name = (url.searchParams.get('name') || 'Player').replace(/[^\w\-[\]]/g, '').slice(0, 20) || 'Player';
+    const ping = +url.searchParams.get('ping') || 50;
     this.tickets.set(id, {
-      ticket: { id, players: [{ id, name, mu: 25 }], pings: { [this.region]: 30 }, enqueuedAt: Date.now() },
+      ticket: { id, players: [{ id, name, mu: 25 }], pings: { [this.region]: ping }, enqueuedAt: Date.now() },
       ws: server,
     });
     server.addEventListener('close', () => this.tickets.delete(id));
@@ -55,10 +57,10 @@ export class Matchmaker extends DurableObject {
 
   status() {
     return {
+      region: this.region,
       lobbyMap: LOBBY_MAP,
-      matchMap: MATCH_MAP,
       queue: [...this.tickets.values()].map((e) => e.ticket.players[0].name),
-      matches: [...this.matches.values()].map((m) => ({ id: m.id, map: m.map, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: m.players })),
+      matches: [...this.matches.values()].map((m) => ({ id: m.id, region: this.region, map: m.map, matchMap: m.matchMap, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: m.players })),
     };
   }
 
@@ -67,7 +69,7 @@ export class Matchmaker extends DurableObject {
   }
 
   server(id) {
-    return this.env.MATCH_SERVER.getByName(id);
+    return this.env[REGIONS[this.region].binding].getByName(id);
   }
 
   async console(match, line) {
@@ -105,13 +107,13 @@ export class Matchmaker extends DurableObject {
       this.send(e, m, b.team);
     }
     for (const nm of newMatches) {
-      const id = 'm-' + crypto.randomUUID().slice(0, 8);
-      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], players: [], map: null };
+      const id = `m-${this.region}-${crypto.randomUUID().slice(0, 8)}`;
+      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], players: [], map: null, matchMap: pickMatchMap() };
       this.matches.set(id, match);
-      console.log(`new match ${id}: starting its server`);
+      console.log(`new match ${id} (${match.matchMap}): starting its server`);
       this.ctx.waitUntil(
         this.server(id)
-          .start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: MATCH_MAP } })
+          .start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: match.matchMap } })
           .catch((err) => console.log(`start ${id}: ${err}`)),
       );
       for (const tid of nm.tickets) {

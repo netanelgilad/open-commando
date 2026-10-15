@@ -92,7 +92,10 @@ extern "C" void Rebel_Debug_Open_Eva(int tab) { PendingEva = tab; }
 static void Save_Test_Game(void);
 static void Load_Test_Game(void);
 
+#include "showroom_web.h"
+
 extern "C" void Rebel_Run_Pending_Actions(void) {
+  Rebel_Showroom_Run_Pending();
   if (!PendingConsole.empty()) {
     std::vector<std::string> lines;
     lines.swap(PendingConsole);

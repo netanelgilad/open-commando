@@ -29,6 +29,7 @@
 #endif
 
 #include "registry.h"
+#include "showroom_web.h"
 #include "_globals.h"
 #include "dx8wrapper.h"
 
@@ -149,6 +150,10 @@ int main(int argc, char **argv) {
     int w = 0, h = 0;
     if (strncmp(argv[i], "--root=", 7) == 0)
       continue;
+    if (strcmp(argv[i], "--showroom") == 0) {
+      Rebel_Showroom_Startup = true;
+      continue;
+    }
     if (sscanf(argv[i], "--res=%dx%d", &w, &h) == 2) {
       if (w >= 640 && h >= 480 && w <= 7680 && h <= 4320)
         Store_Resolution(w, h);

@@ -25,6 +25,7 @@ function flushLog() {
 // console; the engine's debug chatter is dropped.
 const quietLog = params.has('quiet');
 function log(line) {
+  if (line.startsWith('[showroom] on') && Module.rebelShowroomUp) Module.rebelShowroomUp();
   if (quietLog && line[0] !== '[' && !/MainMenuDialogClass|Assert|error/i.test(line)) return;
   console.log(line);
   if (!showLog) return;
@@ -551,41 +552,92 @@ async function boot() {
   const ready = new Promise((resolve) => { Module.onRuntimeInitialized = resolve; });
   await loadScript('renegade.js');
   await ready;
-  setStatus('Ready.');
+  // The showroom (default): the engine boots now, straight to a 3D front
+  // screen with a soldier (Code/Platform/web/showroom_web.cpp), and the
+  // buttons float over it. ?classic: the old start (the engine starts on Play).
+  const showroom = !params.has('classic');
+  if (showroom) {
+    setStatus('Starting…');
+    const up = new Promise((resolve) => {
+      Module.rebelShowroomUp = resolve;
+      setTimeout(resolve, 90000); // shown anyway if the scene never reports in
+    });
+    running = true;
+    Module.callMain([...Module.arguments, '--showroom']);
+    await up;
+    document.body.classList.add('showroom');
+  }
+  setStatus(showroom ? '' : 'Ready.');
   startBtn.hidden = false;
   startBtn.focus();
   // Online play: the match service from the page (meta rebel-online) or
   // ?online=<url>; ?offline hides it.
   const service = params.has('offline') ? null : params.get('online') || document.querySelector('meta[name="rebel-online"]')?.content;
-  const onlineBtn = $('online'), nickEl = $('nick'), cancelBtn = $('cancel');
+  const onlineBtn = $('online'), nickEl = $('nick');
   if (service) {
     onlineBtn.hidden = nickEl.hidden = false;
     nickEl.value = Module.rebelPlayerName || localStorage.getItem('rebel-name') || '';
   }
-  await new Promise((resolve) => {
-    startBtn.addEventListener('click', resolve, { once: true });
+  const choice = await new Promise((resolve) => {
+    startBtn.addEventListener('click', () => resolve('play'), { once: true });
     onlineBtn.addEventListener('click', async function online() {
       try {
-        await findMatch(service);
-        resolve();
+        await findMatch(service, showroom);
+        resolve('online');
       } catch (e) {
-        setStatus(e.message === 'cancelled' ? 'Ready.' : 'Online play: ' + e.message);
+        setStatus(e.message === 'cancelled' ? (showroom ? '' : 'Ready.') : 'Online play: ' + e.message);
         startBtn.hidden = onlineBtn.hidden = nickEl.hidden = false;
       }
     });
   });
   resumeAudio();
+  // Single player: leave the showroom for the main menu. (Online: findMatch
+  // already asked the engine to connect.)
+  if (showroom && choice === 'play') Module.ccall('Rebel_Showroom', null, ['number', 'string'], [0, '']);
+  document.body.classList.remove('showroom');
   overlay.style.display = 'none';
   installInput();
   running = true;
   canvas.focus();
-  Module.callMain(Module.arguments);
+  if (!showroom) Module.callMain(Module.arguments);
+}
+
+// The region with the lowest round trip: a WebSocket echo from each region
+// of the match service (/regions, /ping), median of a few, all in parallel.
+// ?region=<r> picks one by hand.
+async function closestRegion(service) {
+  let regions;
+  try {
+    regions = await (await fetch(service.replace(/^ws/, 'http') + '/regions')).json();
+  } catch {
+    return null; // a service without regions (the local one)
+  }
+  if (params.get('region') && regions[params.get('region')]) return { region: params.get('region'), name: regions[params.get('region')].name, ms: 0 };
+  const measure = (region) => new Promise((resolve) => {
+    const ws = new WebSocket(`${service}/ping?region=${region}`);
+    const times = [];
+    let sentAt = 0;
+    const done = () => { try { ws.close(); } catch {} times.sort((a, b) => a - b); resolve(times.length ? Math.round(times[times.length >> 1]) : Infinity); };
+    const timer = setTimeout(done, 4000);
+    const send = () => { sentAt = performance.now(); ws.send('p'); };
+    ws.onopen = send;
+    ws.onmessage = () => {
+      times.push(performance.now() - sentAt);
+      if (times.length >= 6) { clearTimeout(timer); times.shift(); done(); } // the first wakes the object up
+      else send();
+    };
+    ws.onerror = () => { clearTimeout(timer); done(); };
+  });
+  const results = await Promise.all(Object.keys(regions).map(async (r) => ({ region: r, name: regions[r].name, ms: await measure(r) })));
+  log('[net] region pings: ' + results.map((r) => `${r.region} ${r.ms} ms`).join(', '));
+  results.sort((a, b) => a.ms - b.ms);
+  return results[0].ms < Infinity ? results[0] : null;
 }
 
 // Online play: wait in the matchmaker's queue, then join the match's room
 // and start the game connected to its server (docs/NET_SPIKES.md: S4, S9,
 // S10). The lobby is the match server in warmup until the match starts.
-async function findMatch(serviceUrl) {
+async function findMatch(serviceUrl, engineRunning) {
   const service = serviceUrl.replace(/^http/, 'ws').replace(/\/$/, '');
   const nickEl = $('nick'), cancelBtn = $('cancel');
   const name = nickEl.value.replace(/[^\w\-\[\]]/g, '').slice(0, 20) || 'Player' + Math.floor(100 + Math.random() * 900);
@@ -594,18 +646,22 @@ async function findMatch(serviceUrl) {
   Module.rebelPlayerName = name;
   startBtn.hidden = $('online').hidden = nickEl.hidden = true;
   cancelBtn.hidden = false;
+  setStatus('Finding the closest servers…');
+  const best = await closestRegion(service);
+  const where = best ? ` in ${best.name} (${best.ms} ms)` : '';
   const t0 = Date.now();
   let inQueue = 0;
   const show = () => {
     const s = Math.round((Date.now() - t0) / 1000);
-    setStatus(`Finding a match… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}${inQueue > 1 ? ` · ${inQueue} players looking` : ''}`);
+    setStatus(`Finding a match${where}… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}${inQueue > 1 ? ` · ${inQueue} players looking` : ''}`);
   };
   show();
   const tick = setInterval(show, 1000);
   let ws;
   try {
     const match = await new Promise((resolve, reject) => {
-      ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}`);
+      const region = best ? `&region=${best.region}&ping=${best.ms}` : '';
+      ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}${region}`);
       cancelBtn.onclick = () => { ws.close(); reject(new Error('cancelled')); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
@@ -623,7 +679,8 @@ async function findMatch(serviceUrl) {
     Module.rebelNet.log = (t) => log('[net] ' + t);
     await Module.rebelNet.ready;
     if (params.has('netrtc')) Module.rebelNet.enableRtc({ connectTo: '10.0.0.1' }).catch((e) => log('[net] rtc: ' + e.message));
-    Module.arguments.push('+connect', match.server, '+netplayername', name);
+    if (engineRunning) Module.ccall('Rebel_Online_Connect', null, ['string', 'string'], [match.server, name]);
+    else Module.arguments.push('+connect', match.server, '+netplayername', name);
   } finally {
     clearInterval(tick);
     cancelBtn.hidden = true;
