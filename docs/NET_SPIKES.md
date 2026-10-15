@@ -357,3 +357,23 @@ map loaded.
 - Lobby numbers for the spike: start at 4 players, or once 2 have waited
   60 s (`START_PLAYERS`, `MIN_PLAYERS`, `LOBBY_WAIT_S`; plan: 8 / 2 / 90).
 - Servers stop once their match has been empty for a minute.
+
+## S11: Play online on the public page
+
+- open-commando.netanelgilad.workers.dev (build a32348a): Play, a nickname
+  field (kept in localStorage) and **Play online**; while queued "Finding a
+  match... 0:07 · N players looking" and Cancel. The page finds the match
+  service through `<meta name="rebel-online">`; `?online=<url>` overrides it,
+  `?offline` hides online play.
+- **Version lock relaxed:** online play now matches on `REBEL_NET_VERSION`
+  (cnetwork.cpp, "OPEN COMMANDO NET <n>") instead of the build's git hash,
+  so a page-only deploy keeps working with running servers. Bump it with any
+  change client and server must agree on (netcode, objects, physics,
+  rules), and redeploy the server image together with the page then.
+- Deploy order: build release -> `tools/build-server-image.sh` ->
+  `services/match` `wrangler deploy --secrets-file .secrets.json` (wait for
+  the container rollout: the first start right after can fail) ->
+  `tools/deploy-web.sh` -> `wrangler deploy --config wrangler.jsonc`.
+- Verified against the live service with two players (lobby -> match).
+- Open: anyone can start servers by queueing (capped by max_instances = 3);
+  no accounts, rate limits or region choice yet (one region, WEUR).
