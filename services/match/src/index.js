@@ -1,6 +1,7 @@
 // Match service (spike S6): rooms and their match servers.
 //
 //   GET  /play?name=<nick>   WebSocket: wait for a match (matchmaker-do.js)
+//   GET  /status             the matchmaker: queue, matches, lobbies
 //   GET  /room/<id>          WebSocket: join room <id> (web/net.js frames)
 //   POST /match/<id>/start   start the match server for room <id>
 //   GET  /match/<id>         the server's status (map loaded?, recent log)
@@ -23,6 +24,7 @@ const json = (v, status = 200) => new Response(JSON.stringify(v, null, 2), { sta
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/status') return env.MATCHMAKER.getByName(env.REGION || 'WEUR').fetch(request);
     if (url.pathname === '/play') {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('websocket expected', { status: 426 });
       return env.MATCHMAKER.getByName(env.REGION || 'WEUR').fetch(request);

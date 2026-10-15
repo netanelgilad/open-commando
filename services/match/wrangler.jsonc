@@ -26,8 +26,11 @@
   "vars": {
     "PUBLIC_WSS": "wss://open-commando-match.netanelgilad.workers.dev",
     "REGION": "WEUR",
-    "MIN_PLAYERS": "2", // spike: start at two players (bots aren't wired yet)
-    "BOT_FILL_AFTER_MS": "45000"
+    // Lobby: a match starts at START_PLAYERS, or once it has had MIN_PLAYERS
+    // for LOBBY_WAIT_S (spike values; the plan says 8 / 2 / 90).
+    "START_PLAYERS": "4",
+    "MIN_PLAYERS": "2",
+    "LOBBY_WAIT_S": "60"
   },
   "observability": { "enabled": true },
   "workers_dev": true

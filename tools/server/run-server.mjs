@@ -32,10 +32,10 @@ const { values: opt } = parseArgs({
     game: { type: 'string', default: process.env.REBEL_GAME_DIR || resolve(engine, '../game-data/renegade') },
     bin: { type: 'string', default: join(engine, 'build/wasm-release/bin') },
     work: { type: 'string', default: '/tmp/rebel-server' },
-    map: { type: 'string', default: 'C&C_Field.mix' },
+    map: { type: 'string', default: process.env.REBEL_MAP || 'C&C_Field.mix' },
     // With a lobby (local-service.mjs): --map is the warmup map and the
     // rotation continues to --next-map, the match itself.
-    'next-map': { type: 'string' },
+    'next-map': { type: 'string', default: process.env.REBEL_NEXT_MAP },
     players: { type: 'string', default: '16' },
     name: { type: 'string', default: 'Open Commando' },
     port: { type: 'string', default: '4848' },
@@ -127,18 +127,40 @@ try {
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
 const recent = [];
-let ready = false;
+// What a lobby/matchmaker needs to know, from the server's own console output.
+const state = { ready: false, map: null, loaded: false, warmup: false, players: [] };
+let gameModule = null; // the game's Module once running
+const console_ = (line) => gameModule && gameModule.ccall('Rebel_Console_Command', null, ['string'], [line]);
 const out = (t) => {
   const line = `${stamp()} ${t}`;
   console.log(line);
+  if (/\[net\] rtt|Load \d+% complete/.test(t)) return;
   recent.push(line);
   if (recent.length > 200) recent.shift();
-  if (/Gameplay Pending|Gameplay in progress/.test(t)) ready = true;
+  let m;
+  if (/Gameplay Pending|Gameplay in progress/.test(t)) state.ready = true;
+  if ((m = /Loading level (\S+)/.exec(t))) { state.map = m[1]; state.loaded = false; }
+  if (/Level loaded OK/.test(t)) state.loaded = true;
+  if ((m = /^Warmup (on|off)/.exec(t))) state.warmup = m[1] === 'on';
+  if ((m = /Player (\S+) joined the game/.exec(t)) && !state.players.includes(m[1])) state.players.push(m[1]);
+  if ((m = /Player (\S+) left the game/.exec(t))) state.players = state.players.filter((p) => p !== m[1]);
 };
 if (opt['status-port']) {
+  //   GET  /         {"ready", "map", "loaded", "warmup", "players", "log": [...]}
+  //   POST /console  body: one console command (warmup on, msg ..., gameover)
   createServer((req, res) => {
-    res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ready, uptime: +stamp(), net: net.stats, log: recent.slice(-40) }));
+    if (req.method === 'POST' && req.url === '/console') {
+      let body = '';
+      req.on('data', (d) => (body += d));
+      req.on('end', () => {
+        const line = body.trim().slice(0, 500);
+        if (line) console_(line);
+        res.writeHead(line ? 202 : 400).end();
+      });
+      return;
+    }
+    res.writeHead(state.ready ? 200 : 503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ...state, uptime: +stamp(), net: net.stats, log: recent.slice(-40) }));
   }).listen(+opt['status-port']);
 }
 net.log = (t) => out(`[net] ${t}`);
@@ -152,10 +174,10 @@ globalThis.rebelNodeModule = {
   locateFile: (p) => join(opt.bin, p),
   onAbort: (what) => { console.log(`${stamp()} [abort] ${what && what.stack || what}`); process.exit(1); },
   onRuntimeInitialized() { // `this` is the game's Module
-    const game = this;
+    gameModule = this;
     // The server console: each line on stdin is a game console command.
     createInterface({ input: process.stdin }).on('line', (line) => {
-      if (line.trim()) game.ccall('Rebel_Console_Command', null, ['string'], [line.trim()]);
+      if (line.trim()) console_(line.trim());
     });
     this.callMain([`--root=${root}`, 'STARTSERVER=server.ini', 'NODX']);
   },

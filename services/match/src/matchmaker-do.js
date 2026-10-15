@@ -1,82 +1,175 @@
-// The region's matchmaker (spike S8b): players wait here over a WebSocket;
-// every second the matching pass (matchmaker.js) runs; new matches get a
-// server (MatchServer container) and each player is told where to go.
+// The region's matchmaker: players wait here over a WebSocket; every second
+// the matching pass (matchmaker.js) places them in a match at once (a new
+// one, or backfill into one still in its lobby or early in play), and each
+// match's lobby runs (lobby.js): its server opens in warmup on the lobby map,
+// and when the lobby is ready "warmup off" + "gameover" move everyone to the
+// match map. Match servers are MatchServer containers, driven through their
+// status page and console (tools/server/run-server.mjs --status-port).
 //
 //   GET /play?name=<nick>  (WebSocket)  ->  {"type":"queued"}, then
 //     {"type":"status","waitedS":..,"inQueue":..} every few seconds, then
 //     {"type":"match","room":"<id>","server":"10.0.0.1:4848","team":0|1}
+//     once the match's server has its map loaded.
 //
 // The page then opens /room/<id> and starts the game with
 // +connect 10.0.0.1:4848 (docs/NET_SPIKES.md, S4).
 import { DurableObject } from 'cloudflare:workers';
 import { pass } from './matchmaker.js';
+import { lobbyTick } from './lobby.js';
 
 const MATCH_MINUTES = 30;
+const LOBBY_MAP = 'C&C_Field.mix';
+const MATCH_MAP = 'C&C_Volcano.mix';
 
 export class Matchmaker extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.tickets = new Map(); // ticket id -> { ticket, ws }
-    this.matches = new Map(); // match id -> match (for backfill)
-    this.config = { region: env.REGION || 'WEUR', minPlayers: +(env.MIN_PLAYERS || 8), botFillAfterMs: +(env.BOT_FILL_AFTER_MS || 45000) };
+    this.matches = new Map(); // match id -> { ...match for pass(), lobby, ready, waiting, players }
+    this.region = env.REGION || 'WEUR';
+    this.lobbyConfig = {
+      startPlayers: +(env.START_PLAYERS || 8),
+      minPlayers: +(env.MIN_PLAYERS || 2),
+      lobbyWaitMs: +(env.LOBBY_WAIT_S || 90) * 1000,
+      countdownMs: 10000,
+    };
   }
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/status') return Response.json(this.status());
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();
     const id = crypto.randomUUID();
     const name = (url.searchParams.get('name') || 'Player').replace(/[^\w\-[\]]/g, '').slice(0, 20) || 'Player';
-    const ticket = {
-      id,
-      players: [{ id, name, mu: 25 }],
-      // Pings per region come from the page later; one region for now.
-      pings: { [this.config.region]: +(url.searchParams.get('ping') || 50) },
-      enqueuedAt: Date.now(),
-    };
-    this.tickets.set(id, { ticket, ws: server });
+    this.tickets.set(id, {
+      ticket: { id, players: [{ id, name, mu: 25 }], pings: { [this.region]: 30 }, enqueuedAt: Date.now() },
+      ws: server,
+    });
     server.addEventListener('close', () => this.tickets.delete(id));
     server.addEventListener('error', () => this.tickets.delete(id));
-    server.send(JSON.stringify({ type: 'queued', region: this.config.region }));
-    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + 1000);
+    server.send(JSON.stringify({ type: 'queued', region: this.region }));
+    await this.wake();
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  status() {
+    return {
+      lobbyMap: LOBBY_MAP,
+      matchMap: MATCH_MAP,
+      queue: [...this.tickets.values()].map((e) => e.ticket.players[0].name),
+      matches: [...this.matches.values()].map((m) => ({ id: m.id, map: m.map, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: m.players })),
+    };
+  }
+
+  async wake() {
+    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + 1000);
+  }
+
+  server(id) {
+    return this.env.MATCH_SERVER.getByName(id);
+  }
+
+  async console(match, line) {
+    try {
+      await this.server(match.id).fetch(new Request('http://container/console', { method: 'POST', body: line }));
+    } catch (e) {
+      console.log(`${match.id}: console "${line}": ${e}`);
+    }
   }
 
   async alarm() {
     const now = Date.now();
-    for (const [mid, m] of this.matches) if (now - m.startedAt > m.durationMs) this.matches.delete(mid);
-    const tickets = [...this.tickets.values()].map((e) => e.ticket);
-    const { backfills, newMatches } = pass({ tickets, matches: [...this.matches.values()], now, config: this.config });
-
-    for (const b of backfills) {
-      const m = this.matches.get(b.matchId);
-      const e = this.tickets.get(b.ticketId);
-      if (!m || !e) continue;
-      for (const p of e.ticket.players) m.teams[b.team].push(p.id);
-      this.send(e, m.id, b.team);
-    }
-    for (const nm of newMatches) {
-      const id = 'm-' + crypto.randomUUID().slice(0, 8);
-      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16 };
-      this.matches.set(id, match);
-      // Start the server; players connect to the room meanwhile and the
-      // engine retries its connect until the server answers.
-      this.ctx.waitUntil(this.env.MATCH_SERVER.getByName(id).start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${id}` } }).catch((err) => console.log(`start ${id}: ${err}`)));
-      for (const tid of nm.tickets) {
-        const e = this.tickets.get(tid);
-        if (e) this.send(e, id, nm.teams[0].includes(e.ticket.players[0].id) ? 0 : 1);
-      }
-    }
-    // Waiting players hear how it's going.
+    this.place(now);
+    await Promise.all([...this.matches.values()].map((m) => this.runLobby(m, now)));
     if (Math.floor(now / 1000) % 3 === 0) {
       for (const e of this.tickets.values()) e.ws.send(JSON.stringify({ type: 'status', waitedS: Math.round((now - e.ticket.enqueuedAt) / 1000), inQueue: this.tickets.size }));
     }
-    if (this.tickets.size) await this.ctx.storage.setAlarm(Date.now() + 1000);
+    if (this.tickets.size || this.matches.size) await this.ctx.storage.setAlarm(Date.now() + 1000);
   }
 
-  send(entry, room, team) {
-    entry.ws.send(JSON.stringify({ type: 'match', room, server: '10.0.0.1:4848', team }));
+  // Queue -> matches.
+  place(now) {
+    const open = [...this.matches.values()].filter((m) => !m.lobby || m.lobby.state !== 'live' || now - m.liveAt < m.durationMs / 2);
+    const { backfills, newMatches } = pass({
+      tickets: [...this.tickets.values()].map((e) => e.ticket),
+      matches: open,
+      now,
+      // Place everyone at once: lobbies fill up; the lobby decides when to start.
+      config: { region: this.region, minPlayers: 1, botFillAfterMs: 0, minHumansForBots: 1, pingStartMs: 1000, pingMaxMs: 1000 },
+    });
+    for (const b of backfills) {
+      const m = this.matches.get(b.matchId), e = this.tickets.get(b.ticketId);
+      if (!m || !e) continue;
+      m.teams[b.team].push(...e.ticket.players.map((p) => p.id));
+      this.send(e, m, b.team);
+    }
+    for (const nm of newMatches) {
+      const id = 'm-' + crypto.randomUUID().slice(0, 8);
+      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], players: [], map: null };
+      this.matches.set(id, match);
+      console.log(`new match ${id}: starting its server`);
+      this.ctx.waitUntil(
+        this.server(id)
+          .start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: MATCH_MAP } })
+          .catch((err) => console.log(`start ${id}: ${err}`)),
+      );
+      for (const tid of nm.tickets) {
+        const e = this.tickets.get(tid);
+        if (e) this.send(e, match, nm.teams[0].includes(e.ticket.players[0].id) ? 0 : 1);
+      }
+    }
+  }
+
+  // A player goes to their match once its server has the map loaded.
+  send(entry, match, team) {
     this.tickets.delete(entry.ticket.id);
-    entry.ws.close(1000, 'matched');
+    const go = () => {
+      try {
+        entry.ws.send(JSON.stringify({ type: 'match', room: match.id, server: '10.0.0.1:4848', team }));
+        entry.ws.close(1000, 'matched');
+      } catch {}
+    };
+    if (match.ready) go();
+    else match.waiting.push(go);
+  }
+
+  // One match: read its server's status, run its lobby.
+  async runLobby(m, now) {
+    let s;
+    try {
+      const res = await this.server(m.id).fetch(new Request('http://container/'));
+      s = await res.json();
+    } catch {
+      if (now - m.startedAt > 5 * 60000 && !m.ready) this.matches.delete(m.id); // never came up
+      return;
+    }
+    m.players = s.players || [];
+    if (s.map !== m.map) {
+      m.map = s.map;
+      if (s.map === LOBBY_MAP) m.lobby = { state: 'lobby', openedAt: now, players: m.players.length };
+    }
+    if (s.map === LOBBY_MAP && s.loaded && !s.warmup) await this.console(m, 'warmup on');
+    if (s.loaded && !m.ready) {
+      m.ready = true;
+      for (const go of m.waiting.splice(0)) go();
+    }
+    if (!m.lobby) return;
+    m.lobby.players = m.players.length;
+    for (const a of lobbyTick(m.lobby, now, this.lobbyConfig)) {
+      if (a.type === 'message') await this.console(m, `msg ${a.text}`);
+      if (a.type === 'start') {
+        console.log(`${m.id}: match starts (${m.players.length} players)`);
+        m.liveAt = now;
+        await this.console(m, 'warmup off');
+        await this.console(m, 'gameover');
+      }
+    }
+    // Empty for a while after the match: stop the server.
+    if (m.lobby.state === 'live' && !m.players.length && now - m.liveAt > 60000) {
+      console.log(`${m.id}: empty, stopping`);
+      this.matches.delete(m.id);
+      await this.server(m.id).stop().catch(() => {});
+    }
   }
 }
