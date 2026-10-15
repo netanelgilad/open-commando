@@ -502,7 +502,17 @@ void cNetwork::Compute_Exe_Key(void) {
   // 11/07/01
   // We now match only on build number.
   //
+#ifdef REBEL_PORTABLE
+  // Online play (browser clients and the match servers) matches on a network
+  // protocol version instead of the exact build, so a page-only deploy keeps
+  // working with running servers. Bump it with any change that affects what
+  // client and server exchange or simulate together (netcode, game objects,
+  // physics, rules).
+  const int REBEL_NET_VERSION = 1;
+  string.Format("OPEN COMMANDO NET %d", REBEL_NET_VERSION);
+#else
   string.Format("RENEGADE %s", REBEL::BuildInfo::Get_Hash());
+#endif
 
   WWDEBUG_SAY(("File id string: %s\n", string.Peek_Buffer()));
   key_string += string;

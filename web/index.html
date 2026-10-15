@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Online play: the match service (services/match). -->
+<meta name="rebel-online" content="https://open-commando-match.netanelgilad.workers.dev">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Open Commando</title>
 <link rel="icon" href="data:,">
@@ -25,6 +27,9 @@
   progress { width: min(480px, 80vw); height: 10px; }
   button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid #555; background: #1c1c1c; color: #eee; cursor: pointer; }
   button:hover { background: #2a2a2a; }
+  #play { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #play [hidden] { display: none; }
+  #nick { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid #555; background: #111; color: #eee; width: 11em; }
   #log { position: fixed; left: 0; right: 0; bottom: 0; max-height: 35vh; overflow: auto; margin: 0; padding: 6px 10px; font: 11px/1.35 ui-monospace, monospace; background: rgba(0,0,0,.82); color: #9c9; display: none; z-index: 20; white-space: pre-wrap; }
   body.show-log #log { display: block; }
   #fps { position: fixed; top: 6px; right: 8px; z-index: 15; padding: 2px 6px; border-radius: 4px; font: 12px/1.3 ui-monospace, monospace; background: rgba(0,0,0,.55); color: #8f8; pointer-events: none; display: none; }
@@ -48,8 +53,12 @@
       The files (about 1.3 GB) are copied once into this browser's private storage. Nothing is uploaded.</div>
     <div id="pickerror"></div>
   </div>
-  <button id="start" hidden>Play</button>
-  <button id="online" hidden>Play online</button>
+  <div id="play">
+    <button id="start" hidden>Play</button>
+    <input id="nick" hidden maxlength="20" placeholder="Your name" spellcheck="false" autocomplete="nickname">
+    <button id="online" hidden>Play online</button>
+    <button id="cancel" hidden>Cancel</button>
+  </div>
   <a id="forget" href="#" hidden>Forget game files</a>
   <div id="hint">Click the game to capture the mouse · Alt+Enter: fullscreen (keeps Ctrl and Esc in the game) · Alt+F: frame rate</div>
 </div>

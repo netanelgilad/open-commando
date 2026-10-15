@@ -554,11 +554,25 @@ async function boot() {
   setStatus('Ready.');
   startBtn.hidden = false;
   startBtn.focus();
-  const onlineBtn = $('online');
-  if (params.get('online')) onlineBtn.hidden = false;
+  // Online play: the match service from the page (meta rebel-online) or
+  // ?online=<url>; ?offline hides it.
+  const service = params.has('offline') ? null : params.get('online') || document.querySelector('meta[name="rebel-online"]')?.content;
+  const onlineBtn = $('online'), nickEl = $('nick'), cancelBtn = $('cancel');
+  if (service) {
+    onlineBtn.hidden = nickEl.hidden = false;
+    nickEl.value = Module.rebelPlayerName || localStorage.getItem('rebel-name') || '';
+  }
   await new Promise((resolve) => {
     startBtn.addEventListener('click', resolve, { once: true });
-    onlineBtn.addEventListener('click', () => findMatch().then(resolve, (e) => setStatus('Online: ' + e.message)), { once: true });
+    onlineBtn.addEventListener('click', async function online() {
+      try {
+        await findMatch(service);
+        resolve();
+      } catch (e) {
+        setStatus(e.message === 'cancelled' ? 'Ready.' : 'Online play: ' + e.message);
+        startBtn.hidden = onlineBtn.hidden = nickEl.hidden = false;
+      }
+    });
   });
   resumeAudio();
   overlay.style.display = 'none';
@@ -568,32 +582,43 @@ async function boot() {
   Module.callMain(Module.arguments);
 }
 
-// Online play (?online=<match service URL>): wait in the matchmaker's queue,
-// then join the match's room and start the game connected to its server
-// (docs/NET_SPIKES.md: S4, S8).
-async function findMatch() {
-  const service = params.get('online').replace(/^http/, 'ws').replace(/\/$/, '');
-  const name = Module.rebelPlayerName || 'Player' + Math.floor(Math.random() * 1000);
-  startBtn.hidden = true;
-  $('online').hidden = true;
-  setStatus('Finding a match…');
+// Online play: wait in the matchmaker's queue, then join the match's room
+// and start the game connected to its server (docs/NET_SPIKES.md: S4, S9,
+// S10). The lobby is the match server in warmup until the match starts.
+async function findMatch(serviceUrl) {
+  const service = serviceUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+  const nickEl = $('nick'), cancelBtn = $('cancel');
+  const name = nickEl.value.replace(/[^\w\-\[\]]/g, '').slice(0, 20) || 'Player' + Math.floor(100 + Math.random() * 900);
+  nickEl.value = name;
+  localStorage.setItem('rebel-name', name);
+  Module.rebelPlayerName = name;
+  startBtn.hidden = $('online').hidden = nickEl.hidden = true;
+  cancelBtn.hidden = false;
   const t0 = Date.now();
-  const tick = setInterval(() => {
+  let inQueue = 0;
+  const show = () => {
     const s = Math.round((Date.now() - t0) / 1000);
-    setStatus(`Finding a match… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
-  }, 1000);
+    setStatus(`Finding a match… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}${inQueue > 1 ? ` · ${inQueue} players looking` : ''}`);
+  };
+  show();
+  const tick = setInterval(show, 1000);
+  let ws;
   try {
     const match = await new Promise((resolve, reject) => {
-      const ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}`);
+      ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}`);
+      cancelBtn.onclick = () => { ws.close(); reject(new Error('cancelled')); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
+        if (m.type === 'status') inQueue = m.inQueue;
         if (m.type === 'match') resolve(m);
       };
       ws.onerror = () => reject(new Error('could not reach the matchmaker'));
       ws.onclose = (e) => { if (e.code !== 1000) reject(new Error('the matchmaker closed the connection')); };
     });
     log(`[net] matched: room ${match.room}, team ${match.team}`);
-    setStatus('Match found, joining…');
+    clearInterval(tick);
+    cancelBtn.hidden = true;
+    setStatus('Match found, joining the lobby…');
     Module.rebelNet = RebelNet.create(`${service}/room/${match.room}`);
     Module.rebelNet.log = (t) => log('[net] ' + t);
     await Module.rebelNet.ready;
@@ -601,6 +626,8 @@ async function findMatch() {
     Module.arguments.push('+connect', match.server, '+netplayername', name);
   } finally {
     clearInterval(tick);
+    cancelBtn.hidden = true;
+    cancelBtn.onclick = null;
   }
 }
 
