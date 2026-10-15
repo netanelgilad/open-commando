@@ -335,3 +335,25 @@ client in the match: 95.07 -50.85 -3.44   client2 in the match: -47.49 93.02 -3.
   character: the HUD's "Time Remaining" showed as "T: 0", chat lines as
   "H: L". `Rebel_vsnwprintf` (Platform/win32/win32_wprintf.cpp) rewrites
   Windows format spellings to POSIX ones first.
+
+## S10: the whole loop on Cloudflare
+
+Deployed `services/match` (open-commando-match.netanelgilad.workers.dev) with
+the container (wrangler 4.149 device login; image built with buildx, 1.6 GB,
+private registry; `basic` instances, max 3). The matchmaker Durable Object
+runs each match's lobby itself: it polls the server's status page and sends
+console commands (`POST /console`: `warmup on`, `msg`, `warmup off` +
+`gameover`), and holds each player's "go to room" until the server has its
+map loaded.
+
+- On-demand server: `start` returns in ~0.6 s; the container is running and
+  has C&C_Field loaded ~5.5 s after the start. (The first start right after
+  the deploy failed with error 1101 while the image was still rolling out.)
+- Two browser players pressing Play online (pages from this Mac, service on
+  Cloudflare): matched into one room, server started on demand, both in the
+  Field lobby (warmup, chat status line), a death respawned at another spawn
+  point, the lobby started the match after its wait and both moved to
+  Volcano and spawned there. `ONLINE=https://open-commando-match.netanelgilad.workers.dev node lan.mjs`.
+- Lobby numbers for the spike: start at 4 players, or once 2 have waited
+  60 s (`START_PLAYERS`, `MIN_PLAYERS`, `LOBBY_WAIT_S`; plan: 8 / 2 / 90).
+- Servers stop once their match has been empty for a minute.

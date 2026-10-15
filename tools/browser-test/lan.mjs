@@ -115,6 +115,19 @@ async function choose(p, re) {
   await p.page.waitForTimeout(2500);
   return c;
 }
+// Spawns face a purchase terminal: turn around and step out before a
+// screenshot, so it shows the map rather than the terminal's screen.
+async function lookAround(p) {
+  if (!p.page.keyboard) return;
+  await p.page.mouse.click(512, 384);
+  await p.page.keyboard.down('ArrowLeft');
+  await p.page.waitForTimeout(1300);
+  await p.page.keyboard.up('ArrowLeft');
+  await p.page.keyboard.down('KeyW');
+  await p.page.waitForTimeout(1500);
+  await p.page.keyboard.up('KeyW');
+  await p.page.waitForTimeout(500);
+}
 const shot = (p, n) => p.page.screenshot({ path: `${outDir}/lan-${p.name}-${n}.png`, timeout: 60000 }).catch(() => console.log('screenshot timed out'));
 const dump = (p) => p.page.evaluate(() => setTimeout(() => Module._Rebel_Debug_Input(), 0));
 const save = () => {
@@ -227,7 +240,7 @@ try {
     // respawns (C&C respawns; warmup keeps bases safe).
     if (s.matches[0]?.lobby?.state !== 'live') {
       await clients[0].page.waitForTimeout(16000);
-      for (const c of clients) await shot(c, 'lobby');
+      for (const c of clients) { await lookAround(c); await shot(c, 'lobby'); }
       const c = clients[0];
       // Walk away from the spawn point first, so a respawn is visible.
       await c.page.mouse.click(512, 384);
@@ -259,6 +272,7 @@ try {
       for (const c of clients) await dump(c);
     }
     for (const c of clients) console.log(`${stamp()} ${c.name} in the match: ${c.star}`);
+    for (const c of clients) await lookAround(c);
     for (const p of players) await shot(p, 'match');
   }
   for (const p of players) console.log(`${stamp()} ${p.name} star: ${p.star} net ${await netStats(p)}`);
