@@ -11,6 +11,7 @@
   "containers": [
     {
       "class_name": "MatchServerWEUR",
+      "name": "open-commando-match-matchserver", // the application from before regions
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
       "instance_type": "basic",
