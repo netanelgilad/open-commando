@@ -627,7 +627,15 @@ int DoorPhysClass::Check_Door_Trigger(const OBBoxClass &trigger_zone) {
       //
       // Check if this is a soldier who can open the door
       //
-      if ((soldier != NULL) && soldier->Is_Human_Controlled()) {
+#ifdef REBEL_PORTABLE
+      // Bots (players with no client: a negative control owner other than the
+      // server's) open doors like the players they stand in for.
+      bool opener = soldier != NULL && (soldier->Is_Human_Controlled() ||
+                                        soldier->Get_Control_Owner() != SmartGameObj::SERVER_CONTROL_OWNER);
+#else
+      bool opener = soldier != NULL && soldier->Is_Human_Controlled();
+#endif
+      if (opener) {
 
         WWASSERT(Get_DoorPhysDef() != NULL);
         if (Get_DoorPhysDef()->LockCode == 0) {

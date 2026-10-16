@@ -352,7 +352,7 @@ endif()
 
 if(REBEL_PORTABLE)
     # Browser entry point and link setup for the game.
-    target_sources(Renegade PRIVATE ${PROJECT_SOURCE_DIR}/Code/Platform/web/main_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/debug_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/showroom_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/bots_web.cpp)
+    target_sources(Renegade PRIVATE ${PROJECT_SOURCE_DIR}/Code/Platform/web/main_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/debug_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/showroom_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/bots_web.cpp ${PROJECT_SOURCE_DIR}/Code/Platform/web/navgrid_web.cpp)
     # The engine relies on self-registering statics everywhere (persist and
     # definition factories, save/load subsystems, network object factories,
     # scripts). Objects reachable only through those registrations would be

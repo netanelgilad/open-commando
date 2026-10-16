@@ -25,8 +25,7 @@
 #include "gamedata.h"
 #include "playertype.h"
 #include "wwmath.h"
-#include "pathfind.h"
-#include "pathfindsector.h"
+#include "navgrid_web.h"
 #include "control.h"
 #include "consolemode.h"
 
@@ -61,10 +60,15 @@ struct Bot {
   Goal goal = GOAL_ATTACK;
   Vector3 point;     // GOAL_GOTO
   double nextThink = 0;
-  int target = 0;    // building being pushed (object id), 0 = pick one
   bool accepted = false; // the last order was taken by the soldier's action
-  Vector3 lastPos;   // where it was at the last think (progress check)
-  int stuck = 0;     // thinks in a row without progress
+  Vector3 dest;      // where the current path leads
+  std::vector<Vector3> path; // waypoints (navgrid_web.cpp)
+  size_t wp = 0;     // the one being walked to
+  double lastGoto = 0, nextStep = 0;
+  Vector3 progressPos; // last place it moved on from, and when
+  double progressAt = 0;
+  int stuck = 0;     // replans for being blocked
+  int stuckRow = 0;  // ... in a row, without moving on
 };
 
 std::vector<Bot> Bots;
@@ -115,32 +119,6 @@ void Remove(size_t index) {
   Say("%s left\n", b.name.c_str());
 }
 
-// A point on the pathfinding grid near `around` (ring search at a few
-// heights): building origins and points derived from them are often under
-// the terrain or inside geometry, where no path can end. Falls back to `around`.
-Vector3 Walkable_Near(const Vector3 &around, const Vector3 &toward) {
-  PathfindClass *pf = PathfindClass::Get_Instance();
-  if (!pf || !pf->Does_Pathfind_Data_Exist())
-    return around;
-  Vector3 dir = toward - around;
-  dir.Z = 0;
-  float base = dir.Length() > 0.1f ? atan2f(dir.Y, dir.X) : 0.0f;
-  for (float radius = 12.0f; radius <= 30.0f; radius += 6.0f) {
-    for (int k = 0; k < 12; k++) {
-      // Try the side facing `toward` first, then fan out.
-      float a = base + ((k & 1) ? 1 : -1) * ((k + 1) / 2) * (6.2832f / 12.0f);
-      for (float dz = -4.0f; dz <= 10.0f; dz += 2.0f) {
-        Vector3 p(around.X + radius * cosf(a), around.Y + radius * sinf(a), around.Z + dz);
-        if (PathfindSectorClass *sector = pf->Find_Sector(p, 1.0f)) {
-          const AABoxClass &box = sector->Get_Bounding_Box();
-          return Vector3(p.X, p.Y, box.Center.Z - box.Extent.Z + 0.5f);
-        }
-      }
-    }
-  }
-  return around;
-}
-
 // Nearest standing enemy building to `from` (or our own, to defend).
 BuildingGameObj *Building_For(const Bot &b, const Vector3 &from, bool own) {
   BuildingGameObj *best = nullptr;
@@ -165,59 +143,91 @@ BuildingGameObj *Building_For(const Bot &b, const Vector3 &from, bool own) {
   return best;
 }
 
-void Think_Bot(Bot &b, double now) {
+void Plan(Bot &b, const Vector3 &me, const Vector3 &dest) {
+  b.dest = dest;
+  NavGrid::Find_Path(me, dest, b.path);
+  b.wp = 0;
+  b.lastGoto = 0;
+}
+
+// Goals, every 4-6 s: where to go next.
+void Think_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
   if (now < b.nextThink)
     return;
-  b.nextThink = now + 4000 + (rand() % 2000); // every 4-6 s, not in lockstep
-  SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
-  if (!s || !s->Get_Action())
-    return; // dead: cGod respawns it
-  Vector3 me;
-  s->Get_Position(&me);
+  b.nextThink = now + 4000 + (rand() % 2000); // not in lockstep
+  Vector3 dest = b.point;
+  BuildingGameObj *bld = nullptr;
+  if (b.goal != GOAL_GOTO) {
+    bld = Building_For(b, me, b.goal == GOAL_DEFEND);
+    if (!bld)
+      return;
+    bld->Get_Position(&dest);
+    if (b.goal == GOAL_DEFEND) { // patrol around our building
+      float a = (float)(rand() % 628) / 100.0f;
+      dest += Vector3(14.0f * cosf(a), 14.0f * sinf(a), 0);
+    }
+  }
+  bool arrived = b.wp >= b.path.size();
+  if (arrived && b.goal == GOAL_ATTACK && (me - dest).Length() < 30.0f) {
+    // There: shoot the building (the soldier's own AI turns on anyone who
+    // shows up).
+    ActionParamsStruct params;
+    params.Set_Basic((long)0, 60, 7000 + (-b.id));
+    params.Set_Attack(bld, 40.0f, 1.0f, true);
+    b.accepted = s->Get_Action()->Attack(params);
+    return;
+  }
+  if (arrived || (dest - b.dest).Length() > 8.0f || b.goal == GOAL_DEFEND)
+    Plan(b, me, dest);
+}
+
+// Walking, every 1/4 s: the next waypoint of the path, straight at it (the
+// engine's planner can't plan on these maps); replan when stuck.
+void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
+  if (b.wp >= b.path.size())
+    return;
+  size_t before = b.wp;
+  while (b.wp < b.path.size()) {
+    Vector3 d = b.path[b.wp] - me;
+    if (d.X * d.X + d.Y * d.Y > 1.5f * 1.5f || fabsf(d.Z) > 2.5f)
+      break;
+    b.wp++;
+  }
+  if (b.wp >= b.path.size())
+    return;
+  if ((me - b.progressPos).Length() > 1.5f) {
+    b.progressPos = me;
+    b.progressAt = now;
+    b.stuckRow = 0;
+  } else if (now - b.progressAt > 4000) {
+    // Blocked (another soldier, a vehicle, something the grid missed): jump,
+    // avoid the spot, plan again; still stuck after that, wander off a few
+    // meters first (the goal loop picks the goal up again).
+    b.progressAt = now;
+    b.stuck++;
+    b.stuckRow++;
+    s->Set_Boolean_Control(ControlClass::BOOLEAN_JUMP);
+    Vector3 ahead = b.path[b.wp] - me;
+    ahead.Z = 0;
+    if (ahead.Length() > 0.1f)
+      NavGrid::Block(me + ahead * (1.0f / ahead.Length()), 1.0f);
+    if (b.stuckRow >= 3) {
+      float a = (float)(rand() % 628) / 100.0f;
+      Plan(b, me, me + Vector3(6.0f * cosf(a), 6.0f * sinf(a), 0));
+    } else {
+      Plan(b, me, b.dest);
+    }
+    if (b.path.empty())
+      return;
+  }
+  if (b.wp == before && b.lastGoto && now - b.lastGoto < 3000)
+    return;
   ActionParamsStruct params;
   params.Set_Basic((long)0, 60, 7000 + (-b.id));
-  if (b.goal == GOAL_GOTO) {
-    params.Set_Movement(b.point, 1.0f, 3.0f);
-    b.accepted = s->Get_Action()->Goto(params);
-    return;
-  }
-  BuildingGameObj *bld = Building_For(b, me, b.goal == GOAL_DEFEND);
-  if (!bld)
-    return;
-  Vector3 pos;
-  bld->Get_Position(&pos);
-  if (b.goal == GOAL_DEFEND) {
-    // Patrol near our building: a point a little off it, changing each time.
-    float a = (float)(rand() % 628) / 100.0f;
-    pos += Vector3(8.0f * cosf(a), 8.0f * sinf(a), 0);
-    params.Set_Movement(pos, 0.8f, 3.0f);
-    b.accepted = s->Get_Action()->Goto(params);
-    return;
-  }
-  // Attack: run to walkable ground by the building (the soldier AI engages
-  // anyone it sees on the way). If the planner still can't get there, walk
-  // straight at it in hops and sidestep when blocked.
-  pos = Walkable_Near(pos, me);
-  b.point = pos;
-  float moved = (me - b.lastPos).Length();
-  b.lastPos = me;
-  b.stuck = moved < 2.0f ? b.stuck + 1 : 0;
-  Vector3 hop = pos;
-  if (b.stuck >= 2) {
-    Vector3 d = pos - me;
-    d.Z = 0;
-    float dl = d.Length();
-    if (dl > 40.0f)
-      hop = me + d * (40.0f / dl);
-    if (b.stuck >= 4) { // blocked: go around
-      Vector3 sidestep(-d.Y, d.X, 0);
-      sidestep.Normalize();
-      hop = me + sidestep * ((b.stuck & 1) ? 15.0f : -15.0f);
-    }
-    params.MovePathfind = false;
-  }
-  params.Set_Movement(hop, 1.0f, 5.0f);
+  params.Set_Movement(b.path[b.wp], 1.0f, 1.0f);
+  params.MovePathfind = false;
   b.accepted = s->Get_Action()->Goto(params);
+  b.lastGoto = now;
 }
 
 Bot *Find(const char *name) {
@@ -271,28 +281,26 @@ public:
     static const char *GOALS[] = {"attack", "defend", "goto"};
     for (Bot &b : Bots) {
       SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
-      Vector3 p(0, 0, 0);
-      if (s)
-        s->Get_Position(&p);
-      ActionClass *a = s ? s->Get_Action() : nullptr;
-      Vector3 vel(0, 0, 0);
-      float fwd = 0, turn = 0;
+      Vector3 p(0, 0, 0), vel(0, 0, 0);
       if (s) {
+        s->Get_Position(&p);
         s->Get_Velocity(vel);
-        fwd = s->Get_Control().Get_Analog(ControlClass::ANALOG_MOVE_FORWARD);
-        turn = s->Get_Control().Get_Analog(ControlClass::ANALOG_TURN_LEFT);
       }
-      PathfindClass *pf = PathfindClass::Get_Instance();
-      bool here = pf && s && pf->Find_Sector(p, 1.0f) != nullptr, there = pf && pf->Find_Sector(b.point, 1.0f) != nullptr;
-      Say("  %s: control fwd %.2f turn %.2f, speed %.2f, pathfind sector here %d at target %d\n", b.name.c_str(), fwd, turn,
-          vel.Length(), (int)here, (int)there);
-      Say("bot %s %s %s %s at %.1f %.1f %.1f -> %.1f %.1f, order %s, acting %d active %d busy %d\n", b.name.c_str(),
-                       b.team == PLAYERTYPE_GDI ? "GDI" : "Nod", GOALS[b.goal], s ? "alive" : "dead", p.X, p.Y, p.Z, b.point.X,
-                       b.point.Y, b.accepted ? "taken" : "refused", a ? (int)a->Is_Acting() : -1, a ? (int)a->Is_Active() : -1,
-                       a ? (int)a->Is_Busy() : -1);
+      Say("bot %s %s %s %s at %.1f %.1f %.1f, speed %.1f, waypoint %d/%d to %.1f %.1f, replans %d\n", b.name.c_str(),
+          b.team == PLAYERTYPE_GDI ? "GDI" : "Nod", GOALS[b.goal], s ? "alive" : "dead", p.X, p.Y, p.Z, vel.Length(),
+          (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck);
     }
-    PathfindClass *pf = PathfindClass::Get_Instance();
-    Say("%d bots, pathfind data %s\n", (int)Bots.size(), pf && pf->Does_Pathfind_Data_Exist() ? "yes" : "no");
+    Say("%d bots, walking grid %d nodes\n", (int)Bots.size(), NavGrid::Node_Count());
+  }
+};
+
+class BotNavConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_nav"; }
+  const char *Get_Help(void) override { return "BOT_NAV [file] - write the bots' walking grid as an image (PGM)."; }
+  void Activate(const char *input) override {
+    const char *file = input && *input ? input : "navgrid.pgm";
+    Say(NavGrid::Dump(file) ? "walking grid written to %s\n" : "no walking grid (%s)\n", file);
   }
 };
 
@@ -326,6 +334,7 @@ void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
   list.Add(new BotRemoveConsoleFunctionClass());
   list.Add(new BotListConsoleFunctionClass());
   list.Add(new BotOrderConsoleFunctionClass());
+  list.Add(new BotNavConsoleFunctionClass());
 }
 
 int Rebel_Bots_Count(void) { return (int)Bots.size(); }
@@ -338,6 +347,19 @@ void Rebel_Bots_Think(void) {
     if (!cPlayerManager::Find_Player(Bots[i].id))
       Bots.erase(Bots.begin() + i);
   double now = emscripten_get_now();
-  for (Bot &b : Bots)
-    Think_Bot(b, now);
+  for (Bot &b : Bots) {
+    if (now < b.nextStep)
+      continue;
+    b.nextStep = now + 250;
+    SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
+    if (!s || !s->Get_Action()) { // dead: cGod respawns it
+      b.path.clear();
+      b.wp = 0;
+      continue;
+    }
+    Vector3 me;
+    s->Get_Position(&me);
+    Think_Bot(b, s, me, now);
+    Step_Bot(b, s, me, now);
+  }
 }
