@@ -426,21 +426,35 @@ map loaded.
   (cause not found; the next attempts all worked). Known gap: the page has
   no timeout for a join that never completes.
 
-## S14: bots (in progress)
+## S14: bots
 
 - A bot is an engine player with a negative id (`Code/Platform/web/bots_web.cpp`):
   cGod gives it a soldier and respawns it, the soldier runs the engine's
   soldier AI (sees, shoots), it shows on the scoreboard and counts for its
   team (so 1 human + bots satisfies C&C's "both teams" rule). Console:
-  `bot_add [gdi|nod] [n]`, `bot_remove`, `bot_list`, `bot_order <name|all>
-  <attack|defend|goto x y z>` (the hook for a model "commander" later).
-- Found: the main loop only resolved AI paths when there is a camera, so a
-  renderless server never planned any path (fixed).
-- **Open: navigation.** Multiplayer maps shipped without AI soldiers, and
-  their pathfinding data covers parts of the maps only: from inside the
-  spawn buildings most cross-map paths fail, and bots stand pushing into a
-  wall (forward control 1.0, speed 0.06). Targets now snap to walkable
-  sectors near enemy buildings (some bots do cross the map), with a
-  straight-line/sidestep fallback. Next: our own navigation grid per map
-  (terrain ray casts at server start, A* over it, waypoints walked with
-  `MovePathfind = false`).
+  `bot_add [gdi|nod] [n]`, `bot_remove`, `bot_fill <players>`, `bot_list`,
+  `bot_order <name|all> <attack|defend|goto x y z>` (the hook for a model
+  "commander"), `bot_nav [file]` (the walking grid as an image).
+- **In every game:** the matchmaker (and local-service.mjs) sends
+  `bot_fill 6` (BOT_FILL) when a lobby opens: one bot in or out per second
+  until the game has 6 players and even teams; humans joining push bots
+  out. With MIN_PLAYERS 1 a lone visitor's lobby starts after LOBBY_WAIT_S,
+  and they play a 3v3 with five bots. Verified live (weur, C&C_Canyon).
+- **Navigation:** multiplayer maps shipped without AI soldiers, and their
+  pathfinding data covers parts only. The server builds its own walking
+  grid per map (`navgrid_web.cpp`): downward ray casts on a 1 m grid (every
+  upward surface with 1.9 m headroom is a node: ground, floors, tunnels),
+  links where a soldier-sized box sweeps between neighbors, and a node at
+  each door's center linked to both trigger zones (doors stay solid for the
+  sweeps, else paths clip the door frames). Field: 72k nodes, Islands 122k,
+  Walls 167k; 3-5 s of work, spread over frames (10 ms a frame) so the
+  server keeps running. A* (unreachable goals: as near as it gets),
+  straight-line shortening, waypoints walked with the engine's Goto
+  (`MovePathfind = false`). Stuck: jump, penalize the spot, replan; stuck
+  again: wander off 6 m. Bots that reach an enemy building shoot it.
+- Engine fixes: AI paths only resolved when there is a camera (a renderless
+  server never planned); doors opened only for human-controlled soldiers
+  (now also for bots); the attack action casts its target to a physical
+  object, so it can't target a building (crash): bots aim at a point.
+- Left: Nod bots are slow down the Hand of Nod's stairs; bots don't buy
+  characters or vehicles; no commander yet.
