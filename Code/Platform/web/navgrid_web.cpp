@@ -41,7 +41,7 @@ struct Node {
   int links[10]; // 8 neighbors (DX/DY order), then door links
 };
 
-std::string Level;          // map the grid was built for
+std::string Level;          // what the grid was built for (map, scene)
 Vector3 Min, Max;           // level extents
 int NX = 0, NY = 0;
 std::vector<int> CellStart; // nodes of cell c: CellStart[c] .. CellStart[c + 1]
@@ -150,51 +150,85 @@ int Add_Door_Links(void) {
   return doors;
 }
 
-void Build(void) {
-  double t0 = emscripten_get_now();
-  Ignore_Doors(true);
+// The grid is built a slice at a time (a big map takes seconds; the server
+// keeps running meanwhile): probe row by row, then link row by row.
+enum Phase { PHASE_NONE, PHASE_PROBE, PHASE_LINK, PHASE_READY };
+Phase Building = PHASE_NONE;
+int Row = 0, Links = 0;
+double BuildStarted = 0, BuildMs = 0;
+
+void Start_Build(void) {
   COMBAT_SCENE->Get_Level_Extents(Min, Max);
   NX = (int)ceilf((Max.X - Min.X) / CELL);
   NY = (int)ceilf((Max.Y - Min.Y) / CELL);
   Nodes.clear();
+  Penalty.clear();
   CellStart.assign(NX * NY + 1, 0);
+  Building = PHASE_PROBE;
+  Row = Links = 0;
+  BuildStarted = emscripten_get_now();
+  BuildMs = 0;
+}
+
+void Probe_Row(int j) {
   std::vector<Node> cell;
-  for (int j = 0; j < NY; j++)
-    for (int i = 0; i < NX; i++) {
-      CellStart[j * NX + i] = (int)Nodes.size();
-      cell.clear();
-      Probe_Cell(Min.X + (i + 0.5f) * CELL, Min.Y + (j + 0.5f) * CELL, cell);
-      Nodes.insert(Nodes.end(), cell.begin(), cell.end());
-    }
-  CellStart[NX * NY] = (int)Nodes.size();
-  Ignore_Doors(false);
-  double t1 = emscripten_get_now();
-  int links = 0;
-  for (int j = 0; j < NY; j++)
-    for (int i = 0; i < NX; i++)
-      for (int n = CellStart[j * NX + i]; n < CellStart[j * NX + i + 1]; n++)
-        for (int d = 0; d < 8; d++) {
-          int ni = i + DX[d], nj = j + DY[d];
-          if (ni < 0 || nj < 0 || ni >= NX || nj >= NY)
-            continue;
-          int c = nj * NX + ni, best = -1;
-          float best_dz = MAX_RISE;
-          for (int m = CellStart[c]; m < CellStart[c + 1]; m++) {
-            float dz = fabsf(Nodes[m].pos.Z - Nodes[n].pos.Z);
-            if (dz <= best_dz) {
-              best_dz = dz;
-              best = m;
-            }
-          }
-          if (best >= 0 && Sweep(Nodes[n].pos, Nodes[best].pos)) {
-            Nodes[n].links[d] = best;
-            links++;
+  for (int i = 0; i < NX; i++) {
+    CellStart[j * NX + i] = (int)Nodes.size();
+    cell.clear();
+    Probe_Cell(Min.X + (i + 0.5f) * CELL, Min.Y + (j + 0.5f) * CELL, cell);
+    Nodes.insert(Nodes.end(), cell.begin(), cell.end());
+  }
+}
+
+void Link_Row(int j) {
+  for (int i = 0; i < NX; i++)
+    for (int n = CellStart[j * NX + i]; n < CellStart[j * NX + i + 1]; n++)
+      for (int d = 0; d < 8; d++) {
+        int ni = i + DX[d], nj = j + DY[d];
+        if (ni < 0 || nj < 0 || ni >= NX || nj >= NY)
+          continue;
+        int c = nj * NX + ni, best = -1;
+        float best_dz = MAX_RISE;
+        for (int m = CellStart[c]; m < CellStart[c + 1]; m++) {
+          float dz = fabsf(Nodes[m].pos.Z - Nodes[n].pos.Z);
+          if (dz <= best_dz) {
+            best_dz = dz;
+            best = m;
           }
         }
-  int doors = Add_Door_Links();
-  Penalty.assign(Nodes.size(), 0.0f);
-  fprintf(stderr, "[nav] %s: %dx%d cells from %.1f %.1f, %d nodes, %d links, %d doors (probe %.0f ms, links %.0f ms)\n", Level.c_str(), NX, NY, Min.X, Min.Y,
-          (int)Nodes.size(), links, doors, t1 - t0, emscripten_get_now() - t1);
+        if (best >= 0 && Sweep(Nodes[n].pos, Nodes[best].pos)) {
+          Nodes[n].links[d] = best;
+          Links++;
+        }
+      }
+}
+
+void Build_Step(double budget_ms) {
+  double t0 = emscripten_get_now();
+  if (Building == PHASE_PROBE) {
+    Ignore_Doors(true);
+    while (Row < NY && emscripten_get_now() - t0 < budget_ms)
+      Probe_Row(Row++);
+    Ignore_Doors(false);
+    if (Row == NY) {
+      CellStart[NX * NY] = (int)Nodes.size();
+      Building = PHASE_LINK;
+      Row = 0;
+    }
+  } else if (Building == PHASE_LINK) {
+    while (Row < NY && emscripten_get_now() - t0 < budget_ms)
+      Link_Row(Row++);
+    if (Row == NY) {
+      int doors = Add_Door_Links();
+      Penalty.assign(Nodes.size(), 0.0f);
+      Building = PHASE_READY;
+      fprintf(stderr, "[nav] %s (%s): %dx%d cells, %d nodes, %d links, %d doors (%.0f ms of work over %.1f s)\n",
+              The_Game()->Get_Map_Name().Peek_Buffer(), Level.c_str(), NX,
+              NY, (int)Nodes.size(), Links, doors, BuildMs + emscripten_get_now() - t0,
+              (emscripten_get_now() - BuildStarted) / 1000.0);
+    }
+  }
+  BuildMs += emscripten_get_now() - t0;
 }
 
 // The node a soldier at `p` stands on (or the nearest one around). Nodes
@@ -241,17 +275,28 @@ bool Straight(int a, int b, const std::vector<int> &route, size_t ia, size_t ib)
 } // namespace
 
 bool Ensure(void) {
-  if (!COMBAT_SCENE || !PTheGameData)
+  if (!COMBAT_SCENE || !PTheGameData || CombatManager::Is_Loading_Level())
     return false;
-  std::string level = The_Game()->Get_Map_Name().Peek_Buffer();
-  if (level != Level || Nodes.empty()) {
-    Level = level;
-    Build();
+  // What is actually loaded (the map name changes before the level does: the
+  // score screen still runs on the old one).
+  Vector3 lo, hi;
+  COMBAT_SCENE->Get_Level_Extents(lo, hi);
+  int statics = 0;
+  RefPhysListIterator it = COMBAT_SCENE->Get_Static_Object_Iterator();
+  for (it.First(); !it.Is_Done(); it.Next())
+    statics++;
+  char key[256];
+  snprintf(key, sizeof(key), "%d statics, %.1f %.1f to %.1f %.1f", statics, lo.X, lo.Y, hi.X, hi.Y);
+  if (Level != key) {
+    Level = key;
+    Start_Build();
   }
-  return !Nodes.empty();
+  if (Building != PHASE_READY)
+    Build_Step(10.0);
+  return Building == PHASE_READY && !Nodes.empty();
 }
 
-int Node_Count(void) { return (int)Nodes.size(); }
+int Node_Count(void) { return Building == PHASE_READY ? (int)Nodes.size() : 0; }
 
 namespace {
 // A* from start toward goal; the route ends at the goal or, if it can't be
@@ -300,8 +345,8 @@ float Search(int start, int goal, std::vector<int> &route) {
 
 bool Find_Path(const Vector3 &from, const Vector3 &to, std::vector<Vector3> &path) {
   path.clear();
-  if (!Ensure())
-    return false;
+  if (Building != PHASE_READY || Nodes.empty())
+    return false; // see Ensure
   int start = Nearest(from), goal = Nearest(to);
   if (start < 0 || goal < 0)
     return false;
@@ -358,7 +403,7 @@ void Block(const Vector3 &p, float radius) {
 }
 
 bool Dump(const char *file) {
-  if (!Ensure())
+  if (Building != PHASE_READY)
     return false;
   FILE *f = fopen(file, "wb");
   if (!f)

@@ -7,7 +7,8 @@
 #include <vector>
 
 namespace NavGrid {
-// Builds the grid for the current level if it isn't (logs how long it took).
+// Builds the grid for the current level, a slice per call (call it every
+// frame); true once it is ready.
 bool Ensure(void);
 // A path of waypoints from `from` toward `to` (as close as the grid gets).
 bool Find_Path(const Vector3 &from, const Vector3 &to, std::vector<Vector3> &path);

@@ -32,6 +32,7 @@ export class Matchmaker extends DurableObject {
       minPlayers: +(env.MIN_PLAYERS || 2),
       lobbyWaitMs: +(env.LOBBY_WAIT_S || 90) * 1000,
       countdownMs: 10000,
+      botFill: +(env.BOT_FILL || 0),
     };
   }
 
@@ -182,7 +183,10 @@ export class Matchmaker extends DurableObject {
       m.map = s.map;
       if (s.map === LOBBY_MAP) m.lobby = { state: 'lobby', openedAt: now, players: m.players.length };
     }
-    if (s.map === LOBBY_MAP && s.loaded && !s.warmup) await this.console(m, 'warmup on');
+    if (s.map === LOBBY_MAP && s.loaded && !s.warmup) {
+      await this.console(m, 'warmup on');
+      if (this.lobbyConfig.botFill) await this.console(m, `bot_fill ${this.lobbyConfig.botFill}`);
+    }
     if (s.loaded && !m.ready) {
       m.ready = true;
       for (const go of m.waiting.splice(0)) go();

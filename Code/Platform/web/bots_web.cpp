@@ -9,7 +9,8 @@
 // bot_order (the hook for a smarter commander later).
 //
 // Console (server): bot_add [gdi|nod|auto] [count], bot_remove [count|all],
-// bot_list, bot_order <name|all> <attack|defend|goto x y z>.
+// bot_fill <players>, bot_list, bot_order <name|all> <attack|defend|goto x y z>,
+// bot_nav [file].
 #include "bots_web.h"
 
 #include "consolefunction.h"
@@ -26,6 +27,7 @@
 #include "playertype.h"
 #include "wwmath.h"
 #include "navgrid_web.h"
+#include "combat.h"
 #include "control.h"
 #include "consolemode.h"
 
@@ -72,6 +74,8 @@ struct Bot {
 };
 
 std::vector<Bot> Bots;
+int Fill = 0;            // bot_fill: keep this many players in the game
+double NextFill = 0;
 int NextId = -100;
 const char *NAMES[] = {"Sgt. Hammer", "Cpl. Vance", "Pvt. Ortega", "Lt. Kova", "Sgt. Riggs", "Pvt. Nash",
                        "Cpl. Mercer", "Lt. Shaw", "Pvt. Duke", "Sgt. Kane", "Cpl. Ivy", "Pvt. Brock"};
@@ -170,10 +174,11 @@ void Think_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
   bool arrived = b.wp >= b.path.size();
   if (arrived && b.goal == GOAL_ATTACK && (me - dest).Length() < 30.0f) {
     // There: shoot the building (the soldier's own AI turns on anyone who
-    // shows up).
+    // shows up). At a point on it, not at the object: the attack action
+    // takes its target for a physical object, which a building is not.
     ActionParamsStruct params;
     params.Set_Basic((long)0, 60, 7000 + (-b.id));
-    params.Set_Attack(bld, 40.0f, 1.0f, true);
+    params.Set_Attack(dest + Vector3(0, 0, 2.0f), 40.0f, 1.0f, true);
     b.accepted = s->Get_Action()->Attack(params);
     return;
   }
@@ -263,6 +268,8 @@ public:
   void Activate(const char *input) override {
     bool all = input && strstr(input, "all");
     int team = input && strstr(input, "gdi") ? PLAYERTYPE_GDI : input && strstr(input, "nod") ? PLAYERTYPE_NOD : -1;
+    if (!all && team < 0) // from the bigger team
+      team = Team_Size(PLAYERTYPE_GDI) >= Team_Size(PLAYERTYPE_NOD) ? PLAYERTYPE_GDI : PLAYERTYPE_NOD;
     int count = input && atoi(input) > 0 ? atoi(input) : 1;
     for (int i = (int)Bots.size() - 1; i >= 0 && (all || count > 0); i--) {
       if (team >= 0 && Bots[i].team != team)
@@ -291,6 +298,19 @@ public:
           (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck);
     }
     Say("%d bots, walking grid %d nodes\n", (int)Bots.size(), NavGrid::Node_Count());
+  }
+};
+
+class BotFillConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_fill"; }
+  const char *Get_Help(void) override {
+    return "BOT_FILL <players> - keep the game at this many players with bots, teams even (0: off).";
+  }
+  void Activate(const char *input) override {
+    Fill = input ? std::max(0, std::min(32, atoi(input))) : 0;
+    NextFill = 0;
+    Say("bots fill the game up to %d players\n", Fill);
   }
 };
 
@@ -334,19 +354,45 @@ void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
   list.Add(new BotRemoveConsoleFunctionClass());
   list.Add(new BotListConsoleFunctionClass());
   list.Add(new BotOrderConsoleFunctionClass());
+  list.Add(new BotFillConsoleFunctionClass());
   list.Add(new BotNavConsoleFunctionClass());
 }
 
 int Rebel_Bots_Count(void) { return (int)Bots.size(); }
 
-void Rebel_Bots_Think(void) {
-  if (Bots.empty() || !cNetwork::I_Am_Server())
+// bot_fill: one bot in or out every second until the game has Fill players
+// and even teams; humans joining push bots out.
+void Fill_Bots(double now) {
+  if (now < NextFill || !PTheGameData || CombatManager::Is_Loading_Level())
     return;
+  NextFill = now + 1000;
+  int gdi = Team_Size(PLAYERTYPE_GDI), nod = Team_Size(PLAYERTYPE_NOD), total = gdi + nod;
+  int big = gdi > nod ? PLAYERTYPE_GDI : PLAYERTYPE_NOD;
+  bool uneven = abs(gdi - nod) > 1;
+  if (total > Fill || (uneven && total >= Fill)) {
+    for (int i = (int)Bots.size() - 1; i >= 0; i--)
+      if (Bots[i].team == big || !uneven) {
+        Remove(i);
+        return;
+      }
+  } else if (total < Fill) {
+    Add(Pick_Team(nullptr));
+  }
+}
+
+void Rebel_Bots_Think(void) {
+  if (!cNetwork::I_Am_Server())
+    return;
+  double now = emscripten_get_now();
+  if (Fill > 0)
+    Fill_Bots(now);
+  if (Bots.empty())
+    return;
+  NavGrid::Ensure(); // builds over a few seconds after a map loads
   // Forget bots whose player is gone (a map change resets players).
   for (int i = (int)Bots.size() - 1; i >= 0; i--)
     if (!cPlayerManager::Find_Player(Bots[i].id))
       Bots.erase(Bots.begin() + i);
-  double now = emscripten_get_now();
   for (Bot &b : Bots) {
     if (now < b.nextStep)
       continue;

@@ -15,6 +15,7 @@ export const LOBBY_DEFAULTS = {
   lobbyWaitMs: 90000,
   countdownMs: 10000,
   messageEveryMs: 15000,
+  botFill: 0, // bots keep the game at this many players (the server does it)
 };
 
 const clock = (ms) => {
@@ -42,7 +43,8 @@ export function lobbyTick(lobby, now, config = {}) {
       const need = lobby.players < c.minPlayers
         ? `waiting for ${c.minPlayers - lobby.players} more`
         : `starts at ${c.startPlayers} players or in ${clock(c.lobbyWaitMs - waited)}`;
-      say(`Lobby: ${lobby.players} player${lobby.players === 1 ? '' : 's'}, ${need}. Warmup: fight, respawn, bases can't be damaged.`);
+      const bots = c.botFill > lobby.players ? ' Bots fill the empty slots.' : '';
+      say(`Lobby: ${lobby.players} player${lobby.players === 1 ? '' : 's'}, ${need}. Warmup: fight, respawn, bases can't be damaged.${bots}`);
     }
   } else if (lobby.state === 'countdown') {
     if (lobby.players < c.minPlayers) {

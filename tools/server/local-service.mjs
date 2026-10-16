@@ -34,6 +34,7 @@ const { values: opt } = parseArgs({
     'min-players': { type: 'string', default: '2' },
     'lobby-wait': { type: 'string', default: '90' },
     countdown: { type: 'string', default: '10' },
+    bots: { type: 'string', default: '6' }, // bots keep each game at this many players (0: none)
     'lobby-map': { type: 'string', default: LOBBY_MAP },
     map: { type: 'string' }, // default: a random C&C map per match
     bin: { type: 'string' },
@@ -44,6 +45,7 @@ const lobbyConfig = {
   minPlayers: +opt['min-players'],
   lobbyWaitMs: +opt['lobby-wait'] * 1000,
   countdownMs: +opt.countdown * 1000,
+  botFill: +opt.bots,
 };
 const t0 = Date.now();
 const log = (t) => console.log(`${((Date.now() - t0) / 1000).toFixed(1)} ${t}`);
@@ -75,6 +77,7 @@ function startServer(match) {
     }
     if (/Level loaded OK/.test(line) && match.lobby?.state === 'lobby') {
       proc.stdin.write('warmup on\n'); // once loaded: the console is up by then
+      if (lobbyConfig.botFill) proc.stdin.write(`bot_fill ${lobbyConfig.botFill}\n`);
       if (!match.ready) {
         match.ready = true;
         for (const send of match.waiting.splice(0)) send(); // players waiting for the server
