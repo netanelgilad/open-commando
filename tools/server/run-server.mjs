@@ -183,6 +183,9 @@ globalThis.rebelNodeModule = {
   },
 };
 require(join(opt.bin, 'renegade.js'));
+// As a container's first process (PID 1) nothing ends us on SIGTERM unless
+// we do: the container platform stops idle servers that way.
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { console.log(`${stamp()} ${sig}: exiting`); process.exit(0); });
 // Round trips through the hub (and this event loop, which the game shares)
 // and traffic, every 10 s.
 setInterval(() => net.probe(), 200).unref();

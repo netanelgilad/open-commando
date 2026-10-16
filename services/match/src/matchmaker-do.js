@@ -108,7 +108,7 @@ export class Matchmaker extends DurableObject {
     }
     for (const nm of newMatches) {
       const id = `m-${this.region}-${crypto.randomUUID().slice(0, 8)}`;
-      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], players: [], map: null, matchMap: pickMatchMap() };
+      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], failing: [], players: [], map: null, matchMap: pickMatchMap() };
       this.matches.set(id, match);
       console.log(`new match ${id} (${match.matchMap}): starting its server`);
       this.startServer(match, now);
@@ -130,6 +130,16 @@ export class Matchmaker extends DurableObject {
     );
   }
 
+  // A match whose server never came up (no capacity, a broken start): the
+  // waiting players hear why, and the server is cleaned up.
+  abandon(m, reason) {
+    console.log(`${m.id}: abandoned (${reason})`);
+    this.matches.delete(m.id);
+    for (const fail of m.failing.splice(0)) fail(reason);
+    m.waiting.length = 0;
+    this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));
+  }
+
   // A player goes to their match once its server has the map loaded.
   send(entry, match, team) {
     this.tickets.delete(entry.ticket.id);
@@ -140,7 +150,15 @@ export class Matchmaker extends DurableObject {
       } catch {}
     };
     if (match.ready) go();
-    else match.waiting.push(go);
+    else {
+      match.waiting.push(go);
+      match.failing.push((reason) => {
+        try {
+          entry.ws.send(JSON.stringify({ type: 'error', message: reason }));
+          entry.ws.close(1000, 'failed');
+        } catch {}
+      });
+    }
   }
 
   // One match: read its server's status, run its lobby.
@@ -150,7 +168,7 @@ export class Matchmaker extends DurableObject {
       const res = await this.server(m.id).fetch(new Request('http://container/'));
       s = await res.json();
     } catch {
-      if (!m.ready && now - m.startedAt > 5 * 60000) this.matches.delete(m.id); // never came up
+      if (!m.ready && now - m.startedAt > 2 * 60000) this.abandon(m, 'No game server became available, please try again.');
       else if (!m.ready && now - m.lastStartAt > 15000) this.startServer(m, now);
       return;
     }
@@ -163,6 +181,7 @@ export class Matchmaker extends DurableObject {
     if (s.loaded && !m.ready) {
       m.ready = true;
       for (const go of m.waiting.splice(0)) go();
+      m.failing.length = 0;
     }
     if (!m.lobby) return;
     m.lobby.players = m.players.length;
@@ -180,6 +199,7 @@ export class Matchmaker extends DurableObject {
       console.log(`${m.id}: empty, stopping`);
       this.matches.delete(m.id);
       await this.server(m.id).stop().catch(() => {});
+      this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));
     }
   }
 }

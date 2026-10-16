@@ -77,8 +77,10 @@ export default {
       if (request.method !== 'POST') return new Response('POST expected', { status: 405 });
       if (!env.START_TOKEN || request.headers.get('Authorization') !== `Bearer ${env.START_TOKEN}`) return new Response('forbidden', { status: 403 });
       if (action === '/stop') {
-        await server.stop();
-        return json({ stopped: id });
+        // stop() asks nicely (SIGTERM); destroy() if it is still up.
+        await server.stop().catch(() => {});
+        if ((await server.getState()).status !== 'stopped') await server.destroy().catch(() => {});
+        return json({ stopped: id, state: await server.getState() });
       }
       const t0 = Date.now();
       await server.start({ envVars: { REBEL_NET: `wss://${url.host}/room/${id}` } }, { portReadyTimeoutMS: 120000 });

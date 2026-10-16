@@ -15,7 +15,7 @@
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
       "instance_type": "basic",
-      "max_instances": 2,
+      "max_instances": 5,
       "constraints": { "regions": ["WEUR"] }
     },
     {
@@ -23,7 +23,7 @@
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
       "instance_type": "basic",
-      "max_instances": 2,
+      "max_instances": 5,
       "constraints": { "regions": ["EEUR"] }
     },
     {
@@ -31,7 +31,7 @@
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
       "instance_type": "basic",
-      "max_instances": 2,
+      "max_instances": 5,
       "constraints": { "regions": ["ENAM"] }
     },
     {
@@ -39,7 +39,7 @@
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
       "instance_type": "basic",
-      "max_instances": 2,
+      "max_instances": 5,
       "constraints": { "regions": ["WNAM"] }
     }
   ],

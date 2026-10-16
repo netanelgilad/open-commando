@@ -671,9 +671,10 @@ async function findMatch(serviceUrl, engineRunning) {
         const m = JSON.parse(e.data);
         if (m.type === 'status') inQueue = m.inQueue;
         if (m.type === 'match') resolve(m);
+        if (m.type === 'error') reject(new Error(m.message));
       };
       ws.onerror = () => reject(new Error('could not reach the matchmaker'));
-      ws.onclose = (e) => { if (e.code !== 1000) reject(new Error('the matchmaker closed the connection')); };
+      ws.onclose = (e) => { if (e.code !== 1000 || e.reason === 'failed') reject(new Error(e.reason === 'failed' ? 'no game server became available, please try again' : 'the matchmaker closed the connection')); };
     });
     log(`[net] matched: room ${match.room}, team ${match.team}`);
     clearInterval(tick);
