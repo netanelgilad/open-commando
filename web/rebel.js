@@ -630,8 +630,12 @@ async function closestRegion(service) {
   });
   const results = await Promise.all(Object.keys(regions).map(async (r) => ({ region: r, name: regions[r].name, ms: await measure(r) })));
   log('[net] region pings: ' + results.map((r) => `${r.region} ${r.ms} ms`).join(', '));
-  results.sort((a, b) => a.ms - b.ms);
-  return results[0].ms < Infinity ? results[0] : null;
+  // Regions about as close as the best one count as equal, and then the
+  // order of /regions decides (the busier regions first): players in
+  // between two regions don't split into two empty queues.
+  const bestMs = Math.min(...results.map((r) => r.ms));
+  if (bestMs === Infinity) return null;
+  return results.find((r) => r.ms <= bestMs + 30);
 }
 
 // Online play: wait in the matchmaker's queue, then join the match's room

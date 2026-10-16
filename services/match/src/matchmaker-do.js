@@ -111,16 +111,23 @@ export class Matchmaker extends DurableObject {
       const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], players: [], map: null, matchMap: pickMatchMap() };
       this.matches.set(id, match);
       console.log(`new match ${id} (${match.matchMap}): starting its server`);
-      this.ctx.waitUntil(
-        this.server(id)
-          .start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: match.matchMap } })
-          .catch((err) => console.log(`start ${id}: ${err}`)),
-      );
+      this.startServer(match, now);
       for (const tid of nm.tickets) {
         const e = this.tickets.get(tid);
         if (e) this.send(e, match, nm.teams[0].includes(e.ticket.players[0].id) ? 0 : 1);
       }
     }
+  }
+
+  // Start (or retry starting) a match's server; starts can fail for a while
+  // after a deploy, while the container rolls out.
+  startServer(match, now) {
+    match.lastStartAt = now;
+    this.ctx.waitUntil(
+      this.server(match.id)
+        .start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: match.matchMap } })
+        .catch((err) => console.log(`start ${match.id}: ${err}`)),
+    );
   }
 
   // A player goes to their match once its server has the map loaded.
@@ -143,7 +150,8 @@ export class Matchmaker extends DurableObject {
       const res = await this.server(m.id).fetch(new Request('http://container/'));
       s = await res.json();
     } catch {
-      if (now - m.startedAt > 5 * 60000 && !m.ready) this.matches.delete(m.id); // never came up
+      if (!m.ready && now - m.startedAt > 5 * 60000) this.matches.delete(m.id); // never came up
+      else if (!m.ready && now - m.lastStartAt > 15000) this.startServer(m, now);
       return;
     }
     m.players = s.players || [];
