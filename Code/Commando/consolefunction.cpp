@@ -45,6 +45,7 @@
 #include "combatgmode.h"
 #include "combat.h"
 #include "gamedataupdateevent.h"
+#include "bots_web.h"
 #include "datasafe.h"
 #include "pscene.h"
 #include "playermanager.h"
@@ -5039,6 +5040,7 @@ void ConsoleFunctionManager::Init(void) {
   // A player command in our builds (development-only in the original): the
   // online lobby respawns you, and it gets you out of a stuck spot.
   FunctionList.Add(new SuicideConsoleFunctionClass());
+  Rebel_Bots_Add_Commands(FunctionList);
   FunctionList.Add(new AdminMessageConsoleFunctionClass());
   FunctionList.Add(new GameInfoConsoleFunctionClass());
   FunctionList.Add(new KickConsoleFunctionClass());

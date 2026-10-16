@@ -93,9 +93,11 @@ static void Save_Test_Game(void);
 static void Load_Test_Game(void);
 
 #include "showroom_web.h"
+#include "bots_web.h"
 
 extern "C" void Rebel_Run_Pending_Actions(void) {
   Rebel_Showroom_Run_Pending();
+  Rebel_Bots_Think();
   if (!PendingConsole.empty()) {
     std::vector<std::string> lines;
     lines.swap(PendingConsole);

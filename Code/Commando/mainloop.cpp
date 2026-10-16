@@ -94,6 +94,13 @@ void _Game_Main_Loop_Loop(void) {
       Vector3 camera_pos = COMBAT_CAMERA->Get_Position();
       PathMgrClass::Resolve_Paths(camera_pos);
     }
+#ifdef REBEL_PORTABLE
+    else {
+      // A renderless server has no camera, but its bots need paths too (the
+      // camera position only orders requests by nearness).
+      PathMgrClass::Resolve_Paths(Vector3(0, 0, 0));
+    }
+#endif
   }
 
   {

@@ -40,7 +40,7 @@ const browserFor = async (profile) => {
 };
 const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
-const NETWORK = /suicide|Lobby|Match starting|\[net\]|\[debug\]|abort|Assert|RuntimeError|PAGEERROR|cNetwork|cConnection|[Cc]onnect|[Ss]erver|[Cc]lient|LAN|refus|Accept|Bound|socket|WSA/;
+const NETWORK = /\[bots\]|suicide|Lobby|Match starting|\[net\]|\[debug\]|abort|Assert|RuntimeError|PAGEERROR|cNetwork|cConnection|[Cc]onnect|[Ss]erver|[Cc]lient|LAN|refus|Accept|Bound|socket|WSA/;
 
 async function player(name, profile) {
   const ctx = await browserFor(profile);
@@ -191,6 +191,11 @@ try {
     await choose(host, new RegExp(process.env.HOST_START || '^start|^ok|launch', 'i'));
     await host.page.waitForTimeout(15000);
     await shot(host, 'hosting');
+    // HOST_CMDS="bot_add nod 2;bot_list": console commands on the host page,
+    // then HOST_WATCH=<command> every 10 s for a minute.
+    const hostCmd = (c) => host.page.evaluate((c) => setTimeout(() => Module.ccall('Rebel_Console_Command', null, ['string'], [c]), 0), c);
+    if (process.env.HOST_CMDS) for (const c of process.env.HOST_CMDS.split(';')) await hostCmd(c);
+    if (process.env.HOST_WATCH) for (let i = 0; i < 6; i++) { await host.page.waitForTimeout(10000); await hostCmd(process.env.HOST_WATCH); }
   }
   // C&C gameplay starts once both teams have a player: a dedicated server
   // needs two clients.
