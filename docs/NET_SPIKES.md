@@ -405,3 +405,23 @@ map loaded.
   every 15 s. Code-only deploys: `--containers-rollout=none`.
 - Verified on Cloudflare with two players: showroom -> Play online ->
   region weur -> lobby (respawn) -> random map C&C_Complex, both spawned.
+
+## S13: playing alone in the lobby, signs of life
+
+- Warmup lifts C&C's "both teams need a player" rule
+  (`cGameDataCnc::Is_Gameplay_Permitted`), so a lone player can move, shoot
+  and buy at once. The flag reaches the clients in `cGameDataUpdateEvent`
+  (the `warmup` command re-broadcasts it); network protocol version 2.
+- Warmup tops everyone up to 1500 credits every 2 s (server,
+  `cGameData::Think`), to try the purchase terminals.
+- Front screen: a live line above Play online ("2 players online · 1 in a
+  lobby · 1 match live"), refreshed every 10 s from `/stats` (every
+  region's queue, lobbies and live matches + front-screen visitors). The
+  visitors are counted by the `Presence` Durable Object: one hibernating
+  WebSocket per open front screen, dropped when the game starts.
+- Verified live: one player alone in the lobby: "Gameplay in progress",
+  moved, died and respawned, 1512 credits; a second browser's front screen
+  showed "2 players online · 1 in a lobby".
+- One live join right after the image rollout connected but never joined
+  (cause not found; the next attempts all worked). Known gap: the page has
+  no timeout for a join that never completes.
