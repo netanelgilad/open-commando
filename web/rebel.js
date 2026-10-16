@@ -629,13 +629,18 @@ async function closestRegion(service) {
     ws.onerror = () => { clearTimeout(timer); done(); };
   });
   const results = await Promise.all(Object.keys(regions).map(async (r) => ({ region: r, name: regions[r].name, ms: await measure(r) })));
+  const names = Object.fromEntries(Object.entries(regions).map(([r, v]) => [r, v.name]));
   log('[net] region pings: ' + results.map((r) => `${r.region} ${r.ms} ms`).join(', '));
   // Regions about as close as the best one count as equal, and then the
   // order of /regions decides (the busier regions first): players in
   // between two regions don't split into two empty queues.
   const bestMs = Math.min(...results.map((r) => r.ms));
   if (bestMs === Infinity) return null;
-  return results.find((r) => r.ms <= bestMs + 30);
+  // The service makes the final pick (busiest region about as close).
+  const best = results.reduce((a, b) => (b.ms < a.ms ? b : a));
+  best.names = names;
+  best.pings = results.filter((r) => r.ms < Infinity).map((r) => `${r.region}:${r.ms}`).join(',');
+  return best;
 }
 
 // Online play: wait in the matchmaker's queue, then join the match's room
@@ -652,7 +657,8 @@ async function findMatch(serviceUrl, engineRunning) {
   cancelBtn.hidden = false;
   setStatus('Finding the closest servers…');
   const best = await closestRegion(service);
-  const where = best ? ` in ${best.name} (${best.ms} ms)` : '';
+  let where = best ? ` in ${best.name}` : '';
+  const regionNames = best?.names || {};
   const t0 = Date.now();
   let inQueue = 0;
   const show = () => {
@@ -664,12 +670,13 @@ async function findMatch(serviceUrl, engineRunning) {
   let ws;
   try {
     const match = await new Promise((resolve, reject) => {
-      const region = best ? `&region=${best.region}&ping=${best.ms}` : '';
+      const region = best ? `&pings=${best.pings}` : '';
       ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}${region}`);
       cancelBtn.onclick = () => { ws.close(); reject(new Error('cancelled')); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.type === 'status') inQueue = m.inQueue;
+        if (m.type === 'queued' && m.region && regionNames[m.region]) where = ` in ${regionNames[m.region]}`;
         if (m.type === 'match') resolve(m);
         if (m.type === 'error') reject(new Error(m.message));
       };

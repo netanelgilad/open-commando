@@ -45,6 +45,33 @@ const wantsSocket = (request) => request.headers.get('Upgrade') === 'websocket';
 const placed = (ns, name, region) => ns.get(ns.idFromName(name), { locationHint: region });
 const matchmaker = (env, region) => placed(env.MATCHMAKER, `mm-${region}`, region);
 
+// pings=weur:78,eeur:74,... (the page's round trips to each region).
+const parsePings = (url) => Object.fromEntries((url.searchParams.get('pings') || '').split(',').map((p) => p.split(':')).filter(([r, ms]) => REGIONS[r] && +ms > 0).map(([r, ms]) => [r, +ms]));
+
+// Where a player queues: among the regions they reach about as well as their
+// best (within 60 ms, and under 150 ms), the one with the most players
+// already waiting or in open lobbies; else their closest. Keeps players near
+// two regions together instead of splitting them on ping noise.
+async function chooseRegion(env, url) {
+  const asked = url.searchParams.get('region');
+  if (REGIONS[asked] && !url.searchParams.get('pings')) return asked;
+  const pings = parsePings(url);
+  const ranked = Object.keys(pings).sort((a, b) => pings[a] - pings[b]);
+  if (!ranked.length) return 'weur';
+  const best = pings[ranked[0]];
+  const near = ranked.filter((r) => pings[r] <= best + 60 && pings[r] <= Math.max(150, best));
+  if (near.length < 2) return ranked[0];
+  const busy = await Promise.all(near.map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).then((s) => s.queue.length + s.matches.filter((m) => m.lobby?.state !== 'live').reduce((n, m) => n + m.players.length + 1, 0)).catch(() => 0)));
+  // Most players wins; a tie goes to the earlier region in REGIONS (so
+  // players queueing at the same moment agree).
+  const order = Object.keys(REGIONS);
+  let pick = 0;
+  for (let i = 1; i < near.length; i++) {
+    if (busy[i] > busy[pick] || (busy[i] === busy[pick] && order.indexOf(near[i]) < order.indexOf(near[pick]))) pick = i;
+  }
+  return near[pick];
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -55,9 +82,12 @@ export default {
       return placed(env.PING, `ping-${region}`, region).fetch(request);
     }
     if (url.pathname === '/play') {
-      const region = REGIONS[url.searchParams.get('region')] ? url.searchParams.get('region') : 'weur';
       if (!wantsSocket(request)) return new Response('websocket expected', { status: 426 });
-      return matchmaker(env, region).fetch(new Request(`${url.origin}/play${url.search.includes('region=') ? url.search : `${url.search}${url.search ? '&' : '?'}region=${region}`}`, request));
+      const region = await chooseRegion(env, url);
+      const q = new URLSearchParams(url.search);
+      q.set('region', region);
+      q.set('ping', String(parsePings(url)[region] ?? 50));
+      return matchmaker(env, region).fetch(new Request(`${url.origin}/play?${q}`, request));
     }
     if (url.pathname === '/status') {
       const all = await Promise.all(Object.keys(REGIONS).map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).catch(() => null)));
