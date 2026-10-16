@@ -425,3 +425,22 @@ map loaded.
 - One live join right after the image rollout connected but never joined
   (cause not found; the next attempts all worked). Known gap: the page has
   no timeout for a join that never completes.
+
+## S14: bots (in progress)
+
+- A bot is an engine player with a negative id (`Code/Platform/web/bots_web.cpp`):
+  cGod gives it a soldier and respawns it, the soldier runs the engine's
+  soldier AI (sees, shoots), it shows on the scoreboard and counts for its
+  team (so 1 human + bots satisfies C&C's "both teams" rule). Console:
+  `bot_add [gdi|nod] [n]`, `bot_remove`, `bot_list`, `bot_order <name|all>
+  <attack|defend|goto x y z>` (the hook for a model "commander" later).
+- Found: the main loop only resolved AI paths when there is a camera, so a
+  renderless server never planned any path (fixed).
+- **Open: navigation.** Multiplayer maps shipped without AI soldiers, and
+  their pathfinding data covers parts of the maps only: from inside the
+  spawn buildings most cross-map paths fail, and bots stand pushing into a
+  wall (forward control 1.0, speed 0.06). Targets now snap to walkable
+  sectors near enemy buildings (some bots do cross the map), with a
+  straight-line/sidestep fallback. Next: our own navigation grid per map
+  (terrain ray casts at server start, A* over it, waypoints walked with
+  `MovePathfind = false`).
