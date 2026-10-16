@@ -5,6 +5,8 @@
 //                                  measures its round trip to each)
 //   GET  /play?name=<n>&region=<r> WebSocket: wait for a match (matchmaker-do.js)
 //   GET  /status                   every region's matchmaker: queue, matches, lobbies
+//   GET  /stats                    counts for the front screen (online, in lobbies, matches)
+//   GET  /presence                 WebSocket held open by a front screen (counts visitors)
 //   GET  /room/<id>                WebSocket: join match room <id> (web/net.js frames)
 //   POST /match/<id>/start|stop    start/stop a match server by hand (START_TOKEN)
 //   GET  /match/<id>               a match server's status
@@ -38,6 +40,19 @@ export class Ping extends DurableObject {
     server.addEventListener('message', (e) => server.send(e.data));
     return new Response(null, { status: 101, webSocket: client });
   }
+}
+
+// Front-screen visitors: one WebSocket each, held open (hibernating, so idle
+// sockets cost nothing); the count is the number of sockets.
+export class Presence extends DurableObject {
+  async fetch(request) {
+    if (new URL(request.url).pathname === '/count') return Response.json({ visitors: this.ctx.getWebSockets().length });
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  webSocketMessage() {}
+  webSocketClose(ws) { try { ws.close(); } catch {} }
 }
 
 const json = (v, status = 200) => new Response(JSON.stringify(v, null, 2), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
@@ -88,6 +103,31 @@ export default {
       q.set('region', region);
       q.set('ping', String(parsePings(url)[region] ?? 50));
       return matchmaker(env, region).fetch(new Request(`${url.origin}/play?${q}`, request));
+    }
+    if (url.pathname === '/presence') {
+      if (!wantsSocket(request)) return new Response('websocket expected', { status: 426 });
+      return env.PRESENCE.getByName('global').fetch(request);
+    }
+    if (url.pathname === '/stats') {
+      const [regions, presence] = await Promise.all([
+        Promise.all(Object.keys(REGIONS).map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).catch(() => null))),
+        env.PRESENCE.getByName('global').fetch(new Request(`${url.origin}/count`)).then((res) => res.json()).catch(() => ({ visitors: 0 })),
+      ]);
+      const matches = regions.flatMap((s) => s?.matches || []);
+      const queued = regions.reduce((n, s) => n + (s?.queue.length || 0), 0);
+      const inLobbies = matches.filter((m) => m.lobby && m.lobby.state !== 'live').reduce((n, m) => n + m.players.length, 0);
+      const live = matches.filter((m) => m.lobby?.state === 'live');
+      const inMatches = live.reduce((n, m) => n + m.players.length, 0);
+      return json({
+        online: presence.visitors + queued + inLobbies + inMatches,
+        onFrontScreen: presence.visitors,
+        queued,
+        inLobbies,
+        lobbies: matches.filter((m) => m.lobby && m.lobby.state !== 'live').length,
+        inMatches,
+        matches: live.length,
+        regions: Object.fromEntries(Object.keys(REGIONS).map((r, i) => [r, (regions[i]?.matches || []).reduce((n, m) => n + m.players.length, 0)])),
+      });
     }
     if (url.pathname === '/status') {
       const all = await Promise.all(Object.keys(REGIONS).map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).catch(() => null)));

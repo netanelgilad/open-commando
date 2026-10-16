@@ -38,6 +38,7 @@
 
 #include "networkobjectfactory.h"
 #include "cnetwork.h"
+#include "combat.h"
 #include "apppackettypes.h"
 
 DECLARE_NETWORKOBJECT_FACTORY(cGameDataUpdateEvent, NETCLASSID_GAMEDATAUPDATEEVENT);
@@ -46,6 +47,7 @@ DECLARE_NETWORKOBJECT_FACTORY(cGameDataUpdateEvent, NETCLASSID_GAMEDATAUPDATEEVE
 cGameDataUpdateEvent::cGameDataUpdateEvent(void) {
   Set_App_Packet_Type(APPPACKETTYPE_GAMEDATAUPDATEEVENT);
   TimeRemainingSeconds = 0;
+  IsWarmup = false;
   // ServerIsGameplayPermitted = true;
 }
 
@@ -65,6 +67,7 @@ void cGameDataUpdateEvent::Init(int client_id) {
   TimeRemainingSeconds = (int)The_Game()->Get_Time_Remaining_Seconds();
   // ServerIsGameplayPermitted = The_Game()->Get_Server_Is_Gameplay_Permitted();
   HostedGameNumber = The_Game()->Get_Hosted_Game_Number();
+  IsWarmup = CombatManager::Is_Warmup();
 
   if (client_id == -1) {
     Set_Object_Dirty_Bit(BIT_CREATION, true);
@@ -82,6 +85,7 @@ void cGameDataUpdateEvent::Act(void) {
     // The_Game()->Set_Server_Is_Gameplay_Permitted(ServerIsGameplayPermitted);
   }
   The_Game()->Set_Hosted_Game_Number(HostedGameNumber);
+  CombatManager::Set_Warmup(IsWarmup);
 
   // Set_Delete_Pending();
 }
@@ -95,6 +99,7 @@ void cGameDataUpdateEvent::Export_Creation(BitStreamClass &packet) {
   packet.Add(TimeRemainingSeconds);
   // packet.Add(ServerIsGameplayPermitted);
   packet.Add(HostedGameNumber);
+  packet.Add(IsWarmup);
 
   Set_Delete_Pending();
 }
@@ -108,6 +113,7 @@ void cGameDataUpdateEvent::Import_Creation(BitStreamClass &packet) {
   packet.Get(TimeRemainingSeconds);
   // packet.Get(ServerIsGameplayPermitted);
   packet.Get(HostedGameNumber);
+  packet.Get(IsWarmup);
 
   Act();
 

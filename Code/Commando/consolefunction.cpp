@@ -44,6 +44,7 @@
 #include "textdisplay.h"
 #include "combatgmode.h"
 #include "combat.h"
+#include "gamedataupdateevent.h"
 #include "datasafe.h"
 #include "pscene.h"
 #include "playermanager.h"
@@ -3303,6 +3304,9 @@ public:
       CombatManager::Set_Warmup(true);
     else if (input && strstr(input, "off"))
       CombatManager::Set_Warmup(false);
+    // Tell the clients (gameplay rules and the "pending" label follow it).
+    cGameDataUpdateEvent *update = new cGameDataUpdateEvent();
+    update->Init(-1);
     ConsoleBox.Print("Warmup %s\n", CombatManager::Is_Warmup() ? "on" : "off");
   }
 };

@@ -59,6 +59,7 @@ private:
   int TimeRemainingSeconds;
   // bool						ServerIsGameplayPermitted;
   int HostedGameNumber;
+  bool IsWarmup; // the online lobby (CombatManager::Is_Warmup)
 };
 
 //-----------------------------------------------------------------------------

@@ -575,6 +575,7 @@ async function boot() {
   const service = params.has('offline') ? null : params.get('online') || document.querySelector('meta[name="rebel-online"]')?.content;
   const onlineBtn = $('online'), nickEl = $('nick');
   if (service) {
+    showLife(service);
     onlineBtn.hidden = nickEl.hidden = false;
     nickEl.value = Module.rebelPlayerName || localStorage.getItem('rebel-name') || '';
   }
@@ -594,12 +595,42 @@ async function boot() {
   // Single player: leave the showroom for the main menu. (Online: findMatch
   // already asked the engine to connect.)
   if (showroom && choice === 'play') Module.ccall('Rebel_Showroom', null, ['number', 'string'], [0, '']);
+  stopLife();
   document.body.classList.remove('showroom');
   overlay.style.display = 'none';
   installInput();
   running = true;
   canvas.focus();
   if (!showroom) Module.callMain(Module.arguments);
+}
+
+// Signs of life on the front screen: this visitor counts while the screen is
+// up (/presence), and the live counts refresh every 10 s (/stats).
+let lifeTimer = 0, presenceWs = null;
+function showLife(service) {
+  const el = $('live');
+  const http = service.replace(/^ws/, 'http').replace(/\/$/, '');
+  try { presenceWs = new WebSocket(http.replace(/^http/, 'ws') + '/presence'); } catch {}
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const refresh = async () => {
+    try {
+      const s = await (await fetch(http + '/stats')).json();
+      const parts = [`<b>${plural(s.online, 'player', 'players')} online</b>`];
+      if (s.inLobbies) parts.push(`${s.inLobbies} in a lobby`);
+      if (s.queued) parts.push(`${s.queued} finding a match`);
+      if (s.matches) parts.push(`${plural(s.matches, 'match', 'matches')} live`);
+      el.innerHTML = `<span class="dot"></span>${parts.join(' · ')}`;
+      el.hidden = false;
+    } catch {}
+  };
+  refresh();
+  lifeTimer = setInterval(refresh, 10000);
+}
+function stopLife() {
+  clearInterval(lifeTimer);
+  if (presenceWs) presenceWs.close();
+  const el = $('live');
+  if (el) el.hidden = true;
 }
 
 // The region with the lowest round trip: a WebSocket echo from each region

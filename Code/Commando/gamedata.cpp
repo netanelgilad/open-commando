@@ -1827,6 +1827,20 @@ void cGameData::Get_Time_Limit_Text(WideStringClass &text) {
 
 //-----------------------------------------------------------------------------
 void cGameData::Think(void) {
+  // The online lobby (warmup): credits to try the purchase terminals.
+  if (CombatManager::Is_Warmup() && cNetwork::I_Am_Server()) {
+    static float topup_timer = 0;
+    topup_timer -= TimeManager::Get_Frame_Real_Seconds();
+    if (topup_timer <= 0) {
+      topup_timer = 2;
+      for (SLNode<cPlayer> *n = cPlayerManager::Get_Player_Object_List()->Head(); n; n = n->Next()) {
+        if (n->Data()->Get_Money() < 1500) {
+          n->Data()->Set_Money(1500);
+          n->Data()->Mark_As_Modified();
+        }
+      }
+    }
+  }
   if (IsIntermission.Is_True()) {
     IntermissionTimeRemaining -= TimeManager::Get_Frame_Real_Seconds();
     if (IntermissionTimeRemaining < 0) {

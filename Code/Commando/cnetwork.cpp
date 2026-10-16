@@ -508,7 +508,7 @@ void cNetwork::Compute_Exe_Key(void) {
   // working with running servers. Bump it with any change that affects what
   // client and server exchange or simulate together (netcode, game objects,
   // physics, rules).
-  const int REBEL_NET_VERSION = 1;
+  const int REBEL_NET_VERSION = 2; // 2: warmup flag in cGameDataUpdateEvent
   string.Format("OPEN COMMANDO NET %d", REBEL_NET_VERSION);
 #else
   string.Format("RENEGADE %s", REBEL::BuildInfo::Get_Hash());

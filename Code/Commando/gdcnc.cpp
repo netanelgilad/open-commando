@@ -36,6 +36,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "gdcnc.h"
+#include "combat.h"
 
 #include "specialbuilds.h"
 #include "cnetwork.h"
@@ -420,7 +421,8 @@ bool cGameDataCnc::Is_Valid_Settings(WideStringClass &outMsg, bool check_as_serv
 bool cGameDataCnc::Is_Gameplay_Permitted(void) {
   bool permitted = cGameData::Is_Gameplay_Permitted();
 
-  if (permitted && Get_Max_Players() > 1) {
+  // The online lobby (warmup): play alone or with anyone, no opponent needed.
+  if (permitted && Get_Max_Players() > 1 && !CombatManager::Is_Warmup()) {
     //
     // If your maxplayers is set to more than 1 then you must have an opponent.
     //

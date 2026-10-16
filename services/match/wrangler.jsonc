@@ -48,6 +48,7 @@
       { "name": "ROOMS", "class_name": "Room" },
       { "name": "MATCHMAKER", "class_name": "Matchmaker" },
       { "name": "PING", "class_name": "Ping" },
+      { "name": "PRESENCE", "class_name": "Presence" },
       { "name": "MATCH_SERVER_WEUR", "class_name": "MatchServerWEUR" },
       { "name": "MATCH_SERVER_EEUR", "class_name": "MatchServerEEUR" },
       { "name": "MATCH_SERVER_ENAM", "class_name": "MatchServerENAM" },
@@ -60,7 +61,8 @@
       "tag": "v2",
       "renamed_classes": [{ "from": "MatchServer", "to": "MatchServerWEUR" }],
       "new_sqlite_classes": ["MatchServerEEUR", "MatchServerENAM", "MatchServerWNAM", "Ping"]
-    }
+    },
+    { "tag": "v3", "new_sqlite_classes": ["Presence"] }
   ],
   "vars": {
     "PUBLIC_WSS": "wss://open-commando-match.netanelgilad.workers.dev",
