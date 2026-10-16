@@ -377,3 +377,31 @@ map loaded.
 - Verified against the live service with two players (lobby -> match).
 - Open: anyone can start servers by queueing (capped by max_instances = 3);
   no accounts, rate limits or region choice yet (one region, WEUR).
+
+## S12: front screen, random maps, regions
+
+- **Showroom** (`Code/Platform/web/showroom_web.cpp`): the page boots the
+  engine at once with `--showroom` (intro movies skipped): a small scene of
+  its own (Havoc, `S_A_HUMAN.H_A_A0A0` idle, key + rim lights, a slowly
+  swaying camera) drawn instead of the main menu; the page's controls float
+  over it (title top-left, name / Play / PLAY ONLINE bottom-right). Play
+  leaves it for the classic main menu; Play online queues with the
+  character on screen and joins at runtime (`Rebel_Online_Connect`: the
+  +connect GameSpy-launch path; it marks the launch splash done, which the
+  path waits for and a normal boot never shows). `?classic`: the old start.
+- **Maps:** each match picks a random C&C map (`services/match/src/maps.js`,
+  not the lobby map C&C_Field; the Flying variants left out for now).
+- **Regions:** Cloudflare's four container regions (WEUR, ENAM, WNAM,
+  EEUR). A container class per region pinned with `constraints.regions`
+  (placement is per application), the region's matchmaker and the match
+  rooms placed with Durable Object location hints, match ids carry the
+  region. The page pings each region's echo object (`/ping`, median of 5)
+  and queues in the first region (in preference order) within 30 ms of
+  the closest, so players between two regions don't split. From Israel:
+  WEUR ~78, EEUR ~74, ENAM ~170, WNAM ~190 ms. Servers start on demand in
+  every region (first start in a region can take ~1 min: image pull).
+- Deploys that change the image roll the containers out; starts fail
+  (error 1101) for a minute or two meanwhile: the matchmaker retries a start
+  every 15 s. Code-only deploys: `--containers-rollout=none`.
+- Verified on Cloudflare with two players: showroom -> Play online ->
+  region weur -> lobby (respawn) -> random map C&C_Complex, both spawned.
