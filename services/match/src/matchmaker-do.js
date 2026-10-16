@@ -92,7 +92,10 @@ export class Matchmaker extends DurableObject {
 
   // Queue -> matches.
   place(now) {
-    const open = [...this.matches.values()].filter((m) => !m.lobby || m.lobby.state !== 'live' || now - m.liveAt < m.durationMs / 2);
+    // Open to new players: a server that answers (or is still booting), in its
+    // lobby or early in play.
+    const alive = (m) => (m.ready ? now - (m.lastOkAt || 0) < 10000 : now - m.startedAt < 2 * 60000);
+    const open = [...this.matches.values()].filter((m) => alive(m) && (!m.lobby || m.lobby.state !== 'live' || now - m.liveAt < m.durationMs / 2));
     const { backfills, newMatches } = pass({
       tickets: [...this.tickets.values()].map((e) => e.ticket),
       matches: open,
@@ -168,10 +171,12 @@ export class Matchmaker extends DurableObject {
       const res = await this.server(m.id).fetch(new Request('http://container/'));
       s = await res.json();
     } catch {
+      if (m.ready && now - (m.lastOkAt || 0) > 30000) return this.abandon(m, 'The game server stopped.'); // crashed or stopped
       if (!m.ready && now - m.startedAt > 2 * 60000) this.abandon(m, 'No game server became available, please try again.');
       else if (!m.ready && now - m.lastStartAt > 15000) this.startServer(m, now);
       return;
     }
+    m.lastOkAt = now;
     m.players = s.players || [];
     if (s.map !== m.map) {
       m.map = s.map;
