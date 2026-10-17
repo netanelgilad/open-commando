@@ -287,19 +287,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   const planStats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null, by: {} };
   const planner = mode === 'hybrid' && ai?.url ? llmPlanner(ai, planStats, rec) : null;
   const lastBotChat = {}; // per team: bots' lines at least 6 s apart
-  // Model rate across all bots (a 32-player game of bots would otherwise make
-  // ~60 decision calls a second): over it, a bot decides scripted that time.
-  const clefPerS = +(process.env.REBEL_CLEF_MAX_PER_S || 15);
-  let clefTokens = clefPerS, clefRefill = Date.now();
-  const clefSlot = () => {
-    const now = Date.now();
-    clefTokens = Math.min(clefPerS, clefTokens + ((now - clefRefill) / 1000) * clefPerS);
-    clefRefill = now;
-    if (clefTokens < 1) return false;
-    clefTokens--;
-    return true;
-  };
-  let planning = 0; // planner calls in flight (at most 4)
+
   // The match's model budget: past it, the bots play on scripted.
   const spent = () => (stats.tokens * CLEF_USD_PER_M + planStats.tokens * PLANNER_USD_PER_M) / 1e6;
   let capped = false;
@@ -657,16 +645,9 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       const why = bb.why || 'time to check your plans';
       bb.wantPlan = false;
       bb.why = null;
-      if (planner && withinBudget() && planning < 4) {
+      if (planner && withinBudget()) {
         bb.planning = true;
-        planning++;
-        planWithModel(bot.id, bb, state, why).finally(() => {
-          bb.planning = false;
-          planning--;
-        });
-      } else if (planner && withinBudget()) {
-        bb.nextPlan = now + 3000; // others are planning: soon
-        bb.why = why;
+        planWithModel(bot.id, bb, state, why).finally(() => (bb.planning = false));
       } else usePlans(bb, scriptedPlan(state), state, now, 'scripted');
     }
     const plan = bb.plans.find((p) => p.id === bb.current) || bb.plans[0];
@@ -675,7 +656,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const { world: _w, ...decisionState } = state;
     const t0 = Date.now();
     const modelState = JSON.parse(JSON.stringify(decisionState, (k, v) => (k === 'pos' || k === 'id' ? undefined : v)));
-    const decided = model && withinBudget() && clefSlot() ? await model(modelState, questions) : null;
+    const decided = model && withinBudget() ? await model(modelState, questions) : null;
     const by = decided ? 'clef' : 'scripted';
     // Questions left out (one option) default to the scripted answer.
     const answers = { ...scriptedDecide(state, questionsFor(state, bb, objective, true)), ...decided };
@@ -701,8 +682,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       if (!me || now < bb.nextDecide || bb.busy) continue;
       const busy = bot.sees.length || bb.alerted > now;
       const [lo, hi] = busy ? DECIDE_MS : IDLE_DECIDE_MS;
-      const scale = Math.max(1, world.bots.length / 8); // many bots: each decides less often
-      bb.nextDecide = now + (lo + Math.random() * (hi - lo)) * scale;
+      bb.nextDecide = now + lo + Math.random() * (hi - lo);
       bb.busy = true;
       bb.alive = () => bots.get(bot.id) === bb;
       // Bots think in parallel; each waits only for its own decision.
