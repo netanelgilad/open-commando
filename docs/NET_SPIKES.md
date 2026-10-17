@@ -588,3 +588,43 @@ into C&C_City with five bots; two players: four bots, 3 a side.
   humans, bots, fps, timer lateness, memory, AI spend), keeps the last 50
   matches per region with how they ended and the server's last log lines:
   `GET /history`, `GET /history/<match>`.
+
+## S19: game records, lower ping, reconnecting sockets, smarter driving
+
+- **Records** (tools/server/recorder.mjs): every match server records its
+  games as JSON lines and sends a gzipped batch every 30 s to `POST
+  /record/<match>` (match key), stored in R2 (`open-commando-games`,
+  `matches/<id>/<seq>.jsonl.gz`, plus `summary.json` from the matchmaker);
+  `GET /record/<match>` (START_TOKEN) returns it all. Types: decision (the
+  model's state, the questions with their options, the probabilities),
+  command, plans, planner_call (prompt, reply, model, latency, tokens),
+  planner_error, chat, kill, death, character, vehicle_new/lost/enter/exit,
+  building_damaged/destroyed, snapshot (every 5 s: buildings, players with
+  positions/credits/scores, vehicles, bots' path state), perf (every 10 s:
+  fps, timer lateness, CPU %, memory, AI spend, traffic), log (server
+  console), server/stop. A 3-minute live game: 3.5 MB (about 0.4 MB gzipped).
+- **Ping**: the engine's packet manager held packets to send at most 10
+  times a second (FlushFrequency 100 ms, a 2002 bandwidth saving): ~50 ms
+  each way on average. Now every frame (REBEL_PORTABLE; console
+  `send_frequency <ms>`), and servers send object updates 20 times a
+  second. Local ping (1 ms relay) 65 -> 32 ms; live from here 201-320 ->
+  141-159 ms with an 80-95 ms relay round trip. Region choice: on a tie the
+  player's fastest region (it was REGIONS order).
+- **Reconnects**: the room's hello carries a token; a socket that drops
+  reconnects at once (for up to 30 s) and takes its address back
+  (`?claim=<ip>&token=`), so the game sees a short loss. The room relay
+  also completes the WebSocket close handshake (hibernating sockets don't
+  by themselves: clients never noticed a clean close). Verified on the live
+  relay: back in 553 ms, same address, packets flowing.
+- **Deploys**: tools/deploy-match.sh waits for every region's container
+  rollout; servers started during a rollout get SIGTERM'd minutes later
+  (two "broken" live tests were just that).
+- **Driving**: a second walking grid for vehicles (2 m cells, a 3 m-wide
+  box, 3 m headroom, no door routes); bots replan when getting in or out.
+  The state carries each bot's "feel" (clearance ahead, ahead-left/right,
+  sides, behind; speed); when a bot is stuck or crawling into something,
+  Clef gets a maneuver question (go around left/right, back up left/right,
+  another route, wait, get out) with only the open options, carried out by
+  `bot_do <id> maneuver ...` (a short detour, in reverse for vehicles, then
+  a new path). Test: drivers covered 150-270 m at 7-9 m/s (before: ~40 m
+  and stuck).
