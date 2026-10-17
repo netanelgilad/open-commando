@@ -124,7 +124,6 @@ const PERSONAS = [
   { style: 'veteran: tactical, calls targets, few words' },
   { style: 'joker: fights fine, jokes and trash talks a little (never rude about real people)' },
 ];
-const PLAN_TIMEOUT_MS = 10000;
 
 function planPrompt(view, persona, notes, reason, options) {
   const s = view;
@@ -148,37 +147,47 @@ function planPrompt(view, persona, notes, reason, options) {
   return lines.filter(Boolean).join('\n');
 }
 
-function llmPlanner(ai, stats) {
+// The planner's models, tried in order: a model that fails (out of capacity,
+// too slow) is skipped for a minute; when all fail, scripted plans stand in.
+// Each has its own options (thinking off, JSON mode where it works).
+export const PLANNERS = [
+  { model: 'deepseek-v4-flash', timeoutMs: 6000, input: { response_format: { type: 'json_object' }, chat_template_kwargs: { thinking: false } } },
+  { model: 'gpt-oss-20b', timeoutMs: 8000, input: { reasoning_effort: 'low', max_tokens: 1200 } }, // its reasoning counts against max_tokens
+  { model: 'llama-4-scout', timeoutMs: 8000, input: { response_format: { type: 'json_object' } } }, // slow on long prompts
+];
+const SKIP_FAILED_MS = 60000;
+
+export function llmPlanner(ai, stats) {
+  const skipUntil = {};
   return async (view, persona, notes, reason, options) => {
-    const t0 = Date.now();
-    try {
-      const res = await fetch(ai.url, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${ai.key}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: 'deepseek-v4-flash',
-          input: {
-            messages: [{ role: 'user', content: planPrompt(view, persona, notes, reason, options) }],
-            max_tokens: 400,
-            temperature: 0.8,
-            response_format: { type: 'json_object' },
-            chat_template_kwargs: { thinking: false },
-          },
-        }),
-        signal: AbortSignal.timeout(PLAN_TIMEOUT_MS),
-      });
-      const body = await res.json();
-      const text = body.output?.choices?.[0]?.message?.content;
-      if (!res.ok || !text) throw new Error(body.error || `HTTP ${res.status}`);
-      stats.calls++;
-      stats.ms.push(Date.now() - t0);
-      stats.tokens += body.output.usage?.total_tokens || 0;
-      return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
-    } catch (e) {
-      stats.failed++;
-      stats.lastError = String(e.message || e);
-      return null;
+    const prompt = planPrompt(view, persona, notes, reason, options);
+    for (const p of PLANNERS) {
+      if (Date.now() < (skipUntil[p.model] || 0)) continue;
+      const t0 = Date.now();
+      try {
+        const res = await fetch(ai.url, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${ai.key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model: p.model, input: { messages: [{ role: 'user', content: prompt }], max_tokens: 400, temperature: 0.8, ...p.input } }),
+          signal: AbortSignal.timeout(p.timeoutMs),
+        });
+        const body = await res.json();
+        const text = body.output?.choices?.[0]?.message?.content;
+        if (!res.ok || !text) throw new Error(body.error || `HTTP ${res.status}, no content`);
+        const answer = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+        stats.calls++;
+        stats.ms.push(Date.now() - t0);
+        stats.tokens += body.output.usage?.total_tokens || 0;
+        stats.by[p.model] = (stats.by[p.model] || 0) + 1;
+        return answer;
+      } catch (e) {
+        stats.failed++;
+        stats.lastError = `${p.model}: ${String(e.message || e).slice(0, 120)}`;
+        (stats.errors ??= {})[p.model] = stats.lastError;
+        skipUntil[p.model] = Date.now() + SKIP_FAILED_MS;
+      }
     }
+    return null;
   };
 }
 
@@ -224,7 +233,12 @@ const CALLOUTS = {
   on_my_way: (s, o) => (o ? `Heading to ${o.name.replace(/^the /, '')}` : null),
 };
 
-export function createBrain({ mode = 'scripted', send, log, out = console.log, ai = null }) {
+// Rough list prices (USD per million tokens) for the spending cap: Clef-flash
+// input; the planners' total tokens at the dearest planner's input+output mix.
+const CLEF_USD_PER_M = 0.038;
+const PLANNER_USD_PER_M = 0.7;
+
+export function createBrain({ mode = 'scripted', send, log, out = console.log, ai = null, budgetUsd = 2 }) {
   let world = null;
   let places = [];
   let pending = false;
@@ -233,20 +247,30 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
   const record = (entry) => log && appendFileSync(log, JSON.stringify(entry) + '\n');
   const stats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null };
   const model = (mode === 'clef' || mode === 'hybrid') && ai?.url ? clefDecider(ai, stats) : null;
-  const planStats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null };
+  const planStats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null, by: {} };
   const planner = mode === 'hybrid' && ai?.url ? llmPlanner(ai, planStats) : null;
   const lastBotChat = {}; // per team: bots' lines at least 6 s apart
+  // The match's model budget: past it, the bots play on scripted.
+  const spent = () => (stats.tokens * CLEF_USD_PER_M + planStats.tokens * PLANNER_USD_PER_M) / 1e6;
+  let capped = false;
+  const withinBudget = () => {
+    if (!capped && spent() > budgetUsd) {
+      capped = true;
+      out(`[brain] model budget reached ($${spent().toFixed(2)} of $${budgetUsd}): scripted from now on`);
+    }
+    return !capped;
+  };
   let personaIndex = Math.floor(Math.random() * PERSONAS.length);
   if (mode === 'clef' && !model) out('[brain] clef: no REBEL_AI_URL/REBEL_AI_KEY, deciding scripted');
   if (model) {
     setInterval(() => {
       const ms = stats.ms.splice(0).sort((a, b) => a - b);
       const q = (f) => ms[Math.min(ms.length - 1, Math.floor(ms.length * f))] ?? 0;
-      out(`[brain] clef: ${stats.calls} calls, ${stats.failed} failed${stats.lastError ? ` (${stats.lastError})` : ''}, ${stats.tokens} tokens; latency p50 ${q(0.5)} ms, p90 ${q(0.9)} ms`);
+      out(`[brain] $${spent().toFixed(3)} so far; clef: ${stats.calls} calls, ${stats.failed} failed${stats.lastError ? ` (${stats.lastError})` : ''}, ${stats.tokens} tokens; latency p50 ${q(0.5)} ms, p90 ${q(0.9)} ms`);
       stats.lastError = null;
       if (planner) {
         const pm = planStats.ms.splice(0).sort((a, b) => a - b);
-        out(`[brain] planner: ${planStats.calls} calls, ${planStats.failed} failed${planStats.lastError ? ` (${planStats.lastError})` : ''}, ${planStats.tokens} tokens; latency p50 ${pm[Math.floor(pm.length / 2)] ?? 0} ms`);
+        out(`[brain] planner: ${planStats.calls} calls ${JSON.stringify(planStats.by)}, ${planStats.failed} failed${planStats.lastError ? ` (last: ${planStats.lastError})` : ''}, ${planStats.tokens} tokens; latency p50 ${pm[Math.floor(pm.length / 2)] ?? 0} ms`);
         planStats.lastError = null;
       }
     }, 30000).unref();
@@ -445,7 +469,7 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
       const why = bb.why || 'time to check your plans';
       bb.wantPlan = false;
       bb.why = null;
-      if (planner) {
+      if (planner && withinBudget()) {
         bb.planning = true;
         planWithModel(bot.id, bb, state, why).finally(() => (bb.planning = false));
       } else usePlans(bb, scriptedPlan(state), state, now, 'scripted');
@@ -456,7 +480,7 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     const { world: _w, ...decisionState } = state;
     const t0 = Date.now();
     const modelState = JSON.parse(JSON.stringify(decisionState, (k, v) => (k === 'pos' || k === 'id' ? undefined : v)));
-    const decided = model ? await model(modelState, questions) : null;
+    const decided = model && withinBudget() ? await model(modelState, questions) : null;
     const by = decided ? 'clef' : 'scripted';
     // Questions left out (one option) default to the scripted answer.
     const answers = { ...scriptedDecide(state, questionsFor(state, bb, objective, true)), ...decided };

@@ -179,7 +179,8 @@ await net.ready;
 if (opt['bot-brain'] !== 'off') {
   const { createBrain } = await import('./bot-brain.mjs');
   const ai = process.env.REBEL_AI_URL && { url: process.env.REBEL_AI_URL, key: process.env.REBEL_AI_KEY };
-  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out, ai });
+  const budgetUsd = +(process.env.REBEL_AI_BUDGET_USD || 2); // per server (one match)
+  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out, ai, budgetUsd });
 }
 
 globalThis.rebelNodeModule = {

@@ -73,8 +73,10 @@
     "MIN_PLAYERS": "1",
     "LOBBY_WAIT_S": "60",
     "BOT_FILL": "6",
-    // The bots' brain on match servers: off, scripted, clef (tools/server/bot-brain.mjs).
-    "BOT_BRAIN": "off"
+    // The bots' brain on match servers: off, scripted, clef, hybrid
+    // (tools/server/bot-brain.mjs); its model spend is capped per match
+    // (REBEL_AI_BUDGET_USD, default $2).
+    "BOT_BRAIN": "hybrid"
   },
   "ai": { "binding": "AI" },
   "observability": { "enabled": true },
