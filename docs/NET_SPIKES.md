@@ -529,8 +529,8 @@ Step 1 (this), no models yet:
   listed places exist, and talks far too much unless told players mostly
   don't; bots' lines are rate-limited per team. "C&C is won by destroying
   buildings" in the prompt moved plans from holding to attacking.
-- 3v3, 3 minutes, hybrid: 9-8 (scripted: about 7-4 a minute... in an
-  earlier, easier setup), ~1,000 Clef calls and ~35-45 planner calls;
+- 3v3, 3 minutes, hybrid: 9-8 (the highest of the brain runs; Clef alone
+  before the reflex fix: 0-0), ~1,000 Clef calls and ~35-45 planner calls;
   about $1 a 30-minute match at list prices. Sample chat: "Nash, I'm
   covering your flank on the WF. Keep shooting." / "On your six, Nash.
   Keep burning." / "I'm hurt, pulling back a bit".
