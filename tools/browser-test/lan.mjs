@@ -179,6 +179,9 @@ try {
   let host;
   if (process.env.ONLINE) {
     host = { name: 'matchmaker', lines: [], page: { screenshot: async () => {} } };
+  } else if (process.env.SERVER === 'external') {
+    // A server already running on NET (e.g. the match image under docker).
+    host = { name: 'external', lines: [], page: { screenshot: async () => {} } };
   } else if (process.env.SERVER === 'node') {
     host = await nodeServer();
     players.push(host);

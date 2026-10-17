@@ -534,3 +534,19 @@ Step 1 (this), no models yet:
   about $1 a 30-minute match at list prices. Sample chat: "Nash, I'm
   covering your flank on the WF. Keep shooting." / "On your six, Nash.
   Keep burning." / "I'm hurt, pulling back a bit".
+- Live (weur, hybrid on): Clef p50 ~210-250 ms from the container (p90
+  ~250-500); the planner falls back DeepSeek V4 Flash -> gpt-oss-20b ->
+  Llama 4 Scout -> scripted (a failed model is skipped a minute; gpt-oss
+  needs room for its reasoning: max_tokens 1200, no JSON mode). Per-match
+  model budget REBEL_AI_BUDGET_USD (default $2); about $0.04 for 2.5
+  minutes with 1 human + 5 bots. Server ~420 MB of the basic instance's
+  1 GiB (0.25 vCPU).
+- No bots-only games: bots join only while a human is in the game and
+  leave with the last one; no model calls without a human; lobbies no
+  human reached stop after 90 s, matches 30 s after the last human left.
+- Gotchas: the Dockerfile copies files by name (a new script left out
+  crashed every server: it now copies tools/server/*.mjs); a deploy's
+  container rollout replaces running servers for minutes after `wrangler
+  deploy` returns, so live tests right after a deploy fail for reasons
+  that aren't bugs. The matchmaker now prints a dead server's last log
+  lines, and servers log memory every 10 s.
