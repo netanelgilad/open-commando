@@ -101,8 +101,14 @@ double NextState = 0;
 int Fill = 0;            // bot_fill: keep this many players in the game
 double NextFill = 0;
 int NextId = -100;
+// Enough for a full 32-player game of bots, each name unique (the brain and
+// players tell bots apart by name).
 const char *NAMES[] = {"Sgt. Hammer", "Cpl. Vance", "Pvt. Ortega", "Lt. Kova", "Sgt. Riggs", "Pvt. Nash",
-                       "Cpl. Mercer", "Lt. Shaw", "Pvt. Duke", "Sgt. Kane", "Cpl. Ivy", "Pvt. Brock"};
+                       "Cpl. Mercer", "Lt. Shaw", "Pvt. Duke", "Sgt. Kane", "Cpl. Ivy", "Pvt. Brock",
+                       "Sgt. Reyes", "Cpl. Dalton", "Pvt. Kim", "Lt. Moreau", "Sgt. Okafor", "Pvt. Lindqvist",
+                       "Cpl. Ferro", "Lt. Haddad", "Pvt. Novak", "Sgt. Brandt", "Cpl. Tanaka", "Pvt. Silva",
+                       "Lt. Quinn", "Sgt. Petrov", "Cpl. Adeyemi", "Pvt. Walsh", "Lt. Costa", "Sgt. Varga",
+                       "Cpl. Nolan", "Pvt. Rourke", "Lt. Sato", "Sgt. Diaz"};
 int NameIndex = 0;
 
 int Team_Size(int team) { return cPlayerManager::Tally_Team_Size(team); }
@@ -877,7 +883,7 @@ void Rebel_Bots_Think(void) {
   if (Bots.empty())
     return;
   if (Brain && now >= NextState && !CombatManager::Is_Loading_Level()) {
-    NextState = now + 250;
+    NextState = now + (Bots.size() > 8 ? 500 : 250); // big games: half as often (line of sight is bots x players)
     Emit_State(now);
   }
   // Forget bots whose player is gone (a map change resets players).

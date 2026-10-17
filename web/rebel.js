@@ -732,7 +732,8 @@ async function findMatch(serviceUrl, engineRunning) {
   let ws;
   try {
     const match = await new Promise((resolve, reject) => {
-      const region = best ? `&pings=${best.pings}` : '';
+      // ?bots=<n> on the page: a match of its own, bots filling it to n players.
+      const region = (best ? `&pings=${best.pings}` : '') + (params.get('bots') ? `&bots=${encodeURIComponent(params.get('bots'))}` : '');
       ws = new WebSocket(`${service}/play?name=${encodeURIComponent(name)}${region}`);
       cancelBtn.onclick = () => { ws.close(); reject(new Error('cancelled')); };
       ws.onmessage = (e) => {

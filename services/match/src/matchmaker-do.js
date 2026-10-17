@@ -54,8 +54,12 @@ export class Matchmaker extends DurableObject {
     const id = crypto.randomUUID();
     const name = (url.searchParams.get('name') || 'Player').replace(/[^\w\-[\]]/g, '').slice(0, 20) || 'Player';
     const ping = +url.searchParams.get('ping') || 50;
+    // ?bots=<n>: this player wants a match of their own, bots filling it to n
+    // players (up to 32).
+    const bots = Math.min(32, Math.max(0, Math.floor(+url.searchParams.get('bots') || 0)));
     this.tickets.set(id, {
       ticket: { id, players: [{ id, name, mu: 25 }], pings: { [this.region]: ping }, enqueuedAt: Date.now() },
+      bots,
       ws: server,
     });
     server.addEventListener('close', () => this.tickets.delete(id));
@@ -100,12 +104,26 @@ export class Matchmaker extends DurableObject {
   }
 
   // Queue -> matches.
+  // A new match and its server (botFill: how many players bots fill it to).
+  newMatch(now, region, botFill) {
+    const id = `m-${this.region}-${crypto.randomUUID().slice(0, 8)}`;
+    const match = { id, region, mus: {}, startedAt: now, durationMs: 0, maxPlayers: HUMANS_PER_MATCH, ready: false, waiting: [], failing: [], joining: [], players: [], map: null, maps: mapRotation(), botFill };
+    this.matches.set(id, match);
+    console.log(`new match ${id} (${match.maps[0]}, bots to ${botFill}): starting its server`);
+    this.startServer(match, now);
+    return match;
+  }
+
   place(now) {
+    // Players who asked for a bot count of their own: a match each.
+    for (const e of [...this.tickets.values()].filter((x) => x.bots)) {
+      this.send(e, this.newMatch(now, this.region, e.bots), 0, now);
+    }
     // Open to new players: a server that answers (or is still booting) with
     // room for another human. Its teams, for the pass, are the humans in it
     // and those on their way, split evenly.
     const alive = (m) => (m.ready ? now - (m.lastOkAt || 0) < 10000 : now - m.startedAt < 2 * 60000);
-    const open = [...this.matches.values()].filter(alive).map((m) => {
+    const open = [...this.matches.values()].filter((m) => alive(m) && m.botFill === this.botFill).map((m) => {
       const humans = [...m.players, ...m.joining.map((j) => j.id)];
       return { ...m, teams: [humans.filter((_, i) => i % 2 === 0), humans.filter((_, i) => i % 2 === 1)] };
     });
@@ -120,11 +138,7 @@ export class Matchmaker extends DurableObject {
       if (m && e) this.send(e, m, b.team, now);
     }
     for (const nm of newMatches) {
-      const id = `m-${this.region}-${crypto.randomUUID().slice(0, 8)}`;
-      const match = { id, region: nm.region, mus: {}, startedAt: now, durationMs: 0, maxPlayers: HUMANS_PER_MATCH, ready: false, waiting: [], failing: [], joining: [], players: [], map: null, maps: mapRotation() };
-      this.matches.set(id, match);
-      console.log(`new match ${id} (${match.maps[0]}): starting its server`);
-      this.startServer(match, now);
+      const match = this.newMatch(now, nm.region, this.botFill);
       for (const tid of nm.tickets) {
         const e = this.tickets.get(tid);
         if (e) this.send(e, match, nm.teams[0].includes(e.ticket.players[0].id) ? 0 : 1, now);
@@ -145,6 +159,8 @@ export class Matchmaker extends DurableObject {
         envVars.REBEL_BOT_BRAIN = this.env.BOT_BRAIN;
         envVars.REBEL_AI_URL = `${https}/ai/${match.id}`;
         envVars.REBEL_AI_KEY = key;
+        // The model budget grows with the bots: $0.30 a bot, $2 at least.
+        envVars.REBEL_AI_BUDGET_USD = String(Math.max(2, 0.3 * (match.botFill || 0)));
       }
       await this.server(match.id).start({ envVars });
     };
@@ -249,7 +265,7 @@ export class Matchmaker extends DurableObject {
     m.players = s.players || [];
     if (s.loaded && !m.ready) {
       m.ready = true;
-      if (this.botFill) await this.console(m, `bot_fill ${this.botFill}`);
+      if (m.botFill) await this.console(m, `bot_fill ${m.botFill}`);
       for (const go of m.waiting.splice(0)) go();
       m.failing.length = 0;
     }
