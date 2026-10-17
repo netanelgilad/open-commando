@@ -748,7 +748,7 @@ async function findMatch(serviceUrl, engineRunning) {
     Module.rebelNet.log = (t) => log('[net] ' + t);
     await Module.rebelNet.ready;
     startNetOverlay(Module.rebelNet);
-    startAiCost(service, match.room);
+    startAiCost(serviceUrl.replace(/\/$/, ""), match.room);
     if (params.has('netrtc')) Module.rebelNet.enableRtc({ connectTo: '10.0.0.1' }).catch((e) => log('[net] rtc: ' + e.message));
     if (engineRunning) Module.ccall('Rebel_Online_Connect', null, ['string', 'string'], [match.server, name]);
     else Module.arguments.push('+connect', match.server, '+netplayername', name);
