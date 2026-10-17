@@ -649,11 +649,21 @@ void Rebel_Bots_On_Chat(int sender, int type, const WideStringClass &text) {
 }
 
 // bot_fill: one bot in or out every second until the game has Fill players
-// and even teams; humans joining push bots out.
+// and even teams; humans joining push bots out. Bots only play with humans:
+// with none in the game they all leave (no bots-only games).
 void Fill_Bots(double now) {
   if (now < NextFill || !PTheGameData || CombatManager::Is_Loading_Level())
     return;
   NextFill = now + 1000;
+  int humans = 0;
+  for (SLNode<cPlayer> *n = cPlayerManager::Get_Player_Object_List()->Head(); n; n = n->Next())
+    if (n->Data()->Get_Is_Active().Is_True() && n->Data()->Get_Id() >= 0)
+      humans++;
+  if (!humans) {
+    if (!Bots.empty())
+      Remove(Bots.size() - 1);
+    return;
+  }
   int gdi = Team_Size(PLAYERTYPE_GDI), nod = Team_Size(PLAYERTYPE_NOD), total = gdi + nod;
   int big = gdi > nod ? PLAYERTYPE_GDI : PLAYERTYPE_NOD;
   bool uneven = abs(gdi - nod) > 1;

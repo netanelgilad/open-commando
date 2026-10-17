@@ -210,16 +210,17 @@ export class Matchmaker extends DurableObject {
         await this.console(m, 'gameover');
       }
     }
-    // A lobby nobody is in (or came to) for 3 minutes: stop the server.
+    // No humans: stop the server soon (it costs while it runs; bots only play
+    // with humans). A lobby gets 90 s for the players sent to it to load in.
     if (m.players.length || m.waiting.length) m.lastSeenPlayersAt = now;
-    if (m.lobby.state !== 'live' && now - (m.lastSeenPlayersAt || m.startedAt) > 3 * 60000) {
+    if (m.lobby.state !== 'live' && now - (m.lastSeenPlayersAt || m.startedAt) > 90000) {
       console.log(`${m.id}: lobby empty, stopping`);
       this.matches.delete(m.id);
       this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));
       return;
     }
-    // Empty for a while after the match: stop the server.
-    if (m.lobby.state === 'live' && !m.players.length && now - m.liveAt > 60000) {
+    // Everyone left the match: stop the server.
+    if (m.lobby.state === 'live' && !m.players.length && now - m.liveAt > 60000 && now - (m.lastSeenPlayersAt || 0) > 30000) {
       console.log(`${m.id}: empty, stopping`);
       this.matches.delete(m.id);
       await this.server(m.id).stop().catch(() => {});
