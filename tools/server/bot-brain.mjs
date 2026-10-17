@@ -521,6 +521,8 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
 
   out(`[brain] ${mode} brain for the bots${log ? `, decisions logged to ${log}` : ''}`);
   return {
+    // The models' spend so far (the page shows it during a match).
+    usage: () => ({ usd: +spent().toFixed(4), budgetUsd, decisions: stats.calls, plans: planStats.calls, planners: planStats.by }),
     onState(json) {
       world = JSON.parse(json);
       if (!pending) {

@@ -156,7 +156,7 @@ const out = (t) => {
   if ((m = /Player (\S+) left the game/.exec(t))) state.players = state.players.filter((p) => p !== m[1]);
 };
 if (opt['status-port']) {
-  //   GET  /         {"ready", "map", "loaded", "warmup", "players", "log": [...]}
+  //   GET  /         {"ready", "map", "loaded", "warmup", "players", "perf", "ai", "log": [...]}
   //   POST /console  body: one console command (warmup on, msg ..., gameover)
   createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/console') {
@@ -170,7 +170,7 @@ if (opt['status-port']) {
       return;
     }
     res.writeHead(state.ready ? 200 : 503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ...state, uptime: +stamp(), net: net.stats, log: recent.slice(-40) }));
+    res.end(JSON.stringify({ ...state, uptime: +stamp(), net: net.stats, ai: brain?.usage?.() ?? null, log: recent.slice(-40) }));
   }).listen(+opt['status-port']);
 }
 net.log = (t) => out(`[net] ${t}`);

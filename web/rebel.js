@@ -43,7 +43,7 @@ function rebelFrameTick() {
   fpsLast = now;
   fpsFrames++;
   if (now - fpsSince >= 500) {
-    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms` + (Module.rebelGpuMs ? `  ·  gpu ${Module.rebelGpuMs.toFixed(0)} ms` : "") + netLine;
+    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms` + (Module.rebelGpuMs ? `  ·  gpu ${Module.rebelGpuMs.toFixed(0)} ms` : "") + netLine + aiLine;
     fpsFrames = 0; fpsSince = now; fpsWorst = 0;
   }
 }
@@ -59,6 +59,20 @@ function startNetOverlay(net) {
     const loss = p.sent ? Math.round((1 - p.n / p.sent) * 100) : 0;
     netLine = `\nping ${ping >= 0 ? ping + ' ms' : '-'}  ·  relay ${p.median ?? '-'} ms (worst ${p.max ?? '-'})` + (loss ? `  ·  loss ${loss}%` : '');
   }, 2000);
+}
+// Online: what the bots' models have cost in this match so far, from the
+// match server's status (services/match /match/<id>), every 5 s.
+let aiLine = '';
+function startAiCost(service, room) {
+  const poll = async () => {
+    try {
+      const s = await (await fetch(`${service}/match/${room}`)).json();
+      const ai = s.server?.ai;
+      if (ai) aiLine = `\nAI $${ai.usd.toFixed(3)}  ·  ${ai.decisions} decisions, ${ai.plans} plans`;
+    } catch {}
+  };
+  poll();
+  setInterval(poll, 5000);
 }
 // Alt+F toggles it (F8 is the game's console key); the page keeps the key.
 window.addEventListener('keydown', (e) => {
@@ -734,6 +748,7 @@ async function findMatch(serviceUrl, engineRunning) {
     Module.rebelNet.log = (t) => log('[net] ' + t);
     await Module.rebelNet.ready;
     startNetOverlay(Module.rebelNet);
+    startAiCost(service, match.room);
     if (params.has('netrtc')) Module.rebelNet.enableRtc({ connectTo: '10.0.0.1' }).catch((e) => log('[net] rtc: ' + e.message));
     if (engineRunning) Module.ccall('Rebel_Online_Connect', null, ['string', 'string'], [match.server, name]);
     else Module.arguments.push('+connect', match.server, '+netplayername', name);
