@@ -7,6 +7,7 @@
 //
 //   node tools/server/net-hub.mjs [--port 8790]   ->  ws://127.0.0.1:8790/room/<name>
 import { WebSocketServer } from 'ws';
+import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
@@ -24,18 +25,30 @@ const addressFor = (n) => (10 | ((n >> 8) << 16) | ((n & 255) << 24)) >>> 0; // 
 // let listen() own the port). Returns { rooms, accept(ws, url) }.
 export function createHub() {
   const rooms = new Map(); // name -> Map(address -> ws)
+  const tokens = new Map(); // "room/address" -> reconnect token
   const accept = (ws, url) => {
     const m = /^\/room\/([\w-]{1,64})$/.exec(url.pathname);
     if (!m) return ws.close(1008, 'not found');
     let room = rooms.get(m[1]);
     if (!room) rooms.set(m[1], (room = new Map()));
     const isServer = url.searchParams.get('role') === 'server';
-    if (isServer && room.has(addressFor(1))) return ws.close(1008, 'room already has a server');
-    let n = isServer ? 1 : 2;
-    while (!isServer && room.has(addressFor(n))) n++;
-    const ip = addressFor(n);
+    // A reconnect takes its address back with the token its hello gave it.
+    const claim = url.searchParams.get('claim'), token = url.searchParams.get('token');
+    let ip;
+    if (claim && token && tokens.get(`${m[1]}/${claim}`) === token) {
+      ip = ipFromString(claim);
+      const old = room.get(ip);
+      if (old && old !== ws) { room.delete(ip); old.terminate?.(); }
+    } else {
+      if (isServer && room.has(addressFor(1))) return ws.close(1008, 'room already has a server');
+      let n = isServer ? 1 : 2;
+      while (!isServer && room.has(addressFor(n))) n++;
+      ip = addressFor(n);
+    }
+    const secret = token && tokens.get(`${m[1]}/${ipToString(ip)}`) === token ? token : randomBytes(12).toString('hex');
+    tokens.set(`${m[1]}/${ipToString(ip)}`, secret);
     room.set(ip, ws);
-    ws.send(JSON.stringify({ type: 'hello', address: ipToString(ip) }));
+    ws.send(JSON.stringify({ type: 'hello', address: ipToString(ip), token: secret }));
     ws.on('message', (data, isBinary) => {
       if (!isBinary) {
         // WebRTC signalling between endpoints, forwarded with the sender stamped.
@@ -58,6 +71,7 @@ export function createHub() {
       }
     });
     ws.on('close', () => {
+      if (room.get(ip) !== ws) return; // replaced by its reconnect
       room.delete(ip);
       if (!room.size) rooms.delete(m[1]);
     });

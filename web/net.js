@@ -81,29 +81,57 @@ const RebelNet = (() => {
   }
 
   // A routing hub over WebSocket (reliable and ordered: a lost packet delays
-  // the ones behind it; see docs/ONLINE_PLAN.md, transport T1).
+  // the ones behind it; see docs/ONLINE_PLAN.md, transport T1). A socket that
+  // drops reconnects at once and takes its address back (the hub's hello
+  // gives a token for that), so the game only sees a short loss; it gives up
+  // after RECONNECT_FOR_MS.
+  const RECONNECT_FOR_MS = 30000;
   function wsTransport(url) {
     const t = { name: url };
-    let ws = null;
+    let ws = null, address = null, token = null, closed = false;
+    const withClaim = () => (address && token ? `${url}${url.includes('?') ? '&' : '?'}claim=${address}&token=${token}` : url);
     t.open = (onFrame, onClose) => new Promise((resolve, reject) => {
-      ws = new WebSocket(url);
-      ws.binaryType = 'arraybuffer';
-      let hello = false;
-      ws.onmessage = (e) => {
-        if (typeof e.data === 'string') {
-          const m = JSON.parse(e.data);
-          if (m.type === 'hello') { hello = true; resolve(m.address); }
-          else if (t.onControl) t.onControl(m);
-          return;
-        }
-        onFrame(new Uint8Array(e.data));
+      let lostAt = 0, attempt = 0;
+      const connect = () => {
+        const sock = new WebSocket(withClaim());
+        sock.binaryType = 'arraybuffer';
+        let hello = false;
+        sock.onmessage = (e) => {
+          if (typeof e.data === 'string') {
+            const m = JSON.parse(e.data);
+            if (m.type === 'hello') {
+              hello = true;
+              if (address && m.address !== address) t.log?.(`reconnected with a new address ${m.address} (was ${address})`);
+              else if (address) t.log?.(`reconnected after ${Date.now() - lostAt} ms`);
+              address = m.address;
+              token = m.token || token;
+              lostAt = 0;
+              attempt = 0;
+              resolve(m.address);
+            } else if (t.onControl) t.onControl(m);
+            return;
+          }
+          onFrame(new Uint8Array(e.data));
+        };
+        sock.onerror = () => { if (!address) reject(new Error('could not reach ' + url)); };
+        sock.onclose = () => {
+          if (closed || !address) return;
+          if (!hello && !lostAt) return; // never got in: onerror rejected
+          if (!lostAt) {
+            lostAt = Date.now();
+            t.log?.('connection lost, reconnecting');
+          }
+          if (Date.now() - lostAt > RECONNECT_FOR_MS) return onClose();
+          setTimeout(connect, Math.min(2000, 100 * 2 ** attempt++));
+        };
+        ws = sock;
       };
-      ws.onerror = () => { if (!hello) reject(new Error('could not reach ' + url)); };
-      ws.onclose = () => { if (hello) onClose(); };
+      connect();
     });
-    t.send = (frame) => { if (ws.readyState === 1) ws.send(frame); };
-    t.sendControl = (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
-    t.close = () => ws && ws.close();
+    t.send = (frame) => { if (ws && ws.readyState === 1) ws.send(frame); };
+    t.sendControl = (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+    t.close = () => { closed = true; ws && ws.close(); };
+    t.simulateDrop = () => ws && ws.close(); // testing: as if the network dropped it
     return t;
   }
 
@@ -124,6 +152,7 @@ const RebelNet = (() => {
       transport: transportFor(spec),
       log: (t) => console.log('[net] ' + t),
     };
+    net.transport.log = (t) => net.log(t);
 
     const deliver = (d) => {
       net.stats.receivedPackets++;

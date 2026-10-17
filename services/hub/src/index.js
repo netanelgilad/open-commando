@@ -34,17 +34,34 @@ export class Room extends DurableObject {
   }
 
   async fetch(request) {
-    const isServer = new URL(request.url).searchParams.get('role') === 'server';
-    if (isServer && this.byAddress.has(addressFor(1))) return new Response('room already has a server', { status: 409 });
+    const url = new URL(request.url);
+    const isServer = url.searchParams.get('role') === 'server';
+    // A reconnect takes its address back with the token its hello gave it
+    // (kept in storage: the old socket may be long gone).
+    const claim = url.searchParams.get('claim'), token = url.searchParams.get('token');
+    let ip = null, reclaimed = false;
+    if (claim && token && (await this.ctx.storage.get(`token:${claim}`)) === token) {
+      ip = ipFromString(claim);
+      reclaimed = true;
+      const old = this.byAddress.get(ip);
+      if (old) {
+        this.byAddress.delete(ip);
+        try { old.close(1000, 'replaced by a reconnect'); } catch {}
+      }
+    } else {
+      if (isServer && this.byAddress.has(addressFor(1))) return new Response('room already has a server', { status: 409 });
+      let n = isServer ? 1 : 2;
+      while (!isServer && this.byAddress.has(addressFor(n))) n++;
+      ip = addressFor(n);
+    }
+    const secret = reclaimed ? token : [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await this.ctx.storage.put(`token:${ipToString(ip)}`, secret);
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    let n = isServer ? 1 : 2;
-    while (!isServer && this.byAddress.has(addressFor(n))) n++;
-    const ip = addressFor(n);
     server.serializeAttachment({ ip });
     this.byAddress.set(ip, server);
-    server.send(JSON.stringify({ type: 'hello', address: ipToString(ip) }));
+    server.send(JSON.stringify({ type: 'hello', address: ipToString(ip), token: secret }));
     return new Response(null, { status: 101, webSocket: client });
   }
 
