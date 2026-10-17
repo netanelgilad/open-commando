@@ -1,10 +1,11 @@
 // The region's matchmaker: players wait here over a WebSocket; every second
-// the matching pass (matchmaker.js) places them in a match at once (a new
-// one, or backfill into one still in its lobby or early in play), and each
-// match's lobby runs (lobby.js): its server opens in warmup on the lobby map,
-// and when the lobby is ready "warmup off" + "gameover" move everyone to the
-// match map. Match servers are MatchServer containers, driven through their
-// status page and console (tools/server/run-server.mjs --status-port).
+// the matching pass (matchmaker.js) places them at once in a running match
+// with room for another human, or starts a new one. A match server plays
+// real C&C games straight away, map after map (a random rotation); bots fill
+// every game to BOT_FILL players and each human who joins takes a bot's
+// place, teams kept even (bots_web.cpp, bot_fill). Match servers are
+// MatchServer containers, driven through their status page and console
+// (tools/server/run-server.mjs --status-port).
 //
 //   GET /play?name=<nick>  (WebSocket)  ->  {"type":"queued"}, then
 //     {"type":"status","waitedS":..,"inQueue":..} every few seconds, then
@@ -15,26 +16,19 @@
 // +connect 10.0.0.1:4848 (docs/NET_SPIKES.md, S4).
 import { DurableObject } from 'cloudflare:workers';
 import { pass } from './matchmaker.js';
-import { lobbyTick } from './lobby.js';
-import { LOBBY_MAP, pickMatchMap } from './maps.js';
+import { mapRotation } from './maps.js';
 import { REGIONS } from './regions.js';
 import { aiKey } from './ai.js';
 
-const MATCH_MINUTES = 30;
+const HUMANS_PER_MATCH = 8; // bots make up the rest (BOT_FILL)
 
 export class Matchmaker extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.tickets = new Map(); // ticket id -> { ticket, ws }
-    this.matches = new Map(); // match id -> { ...match for pass(), lobby, ready, waiting, players }
+    this.matches = new Map(); // match id -> { ...match for pass(), ready, waiting, joining, players }
     this.region = null; // set by the first request (?region=), see index.js
-    this.lobbyConfig = {
-      startPlayers: +(env.START_PLAYERS || 8),
-      minPlayers: +(env.MIN_PLAYERS || 2),
-      lobbyWaitMs: +(env.LOBBY_WAIT_S || 90) * 1000,
-      countdownMs: 10000,
-      botFill: +(env.BOT_FILL || 0),
-    };
+    this.botFill = +(env.BOT_FILL || 0);
   }
 
   async fetch(request) {
@@ -60,9 +54,8 @@ export class Matchmaker extends DurableObject {
   status() {
     return {
       region: this.region,
-      lobbyMap: LOBBY_MAP,
       queue: [...this.tickets.values()].map((e) => e.ticket.players[0].name),
-      matches: [...this.matches.values()].map((m) => ({ id: m.id, region: this.region, map: m.map, matchMap: m.matchMap, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: m.players })),
+      matches: [...this.matches.values()].map((m) => ({ id: m.id, region: this.region, map: m.map, ready: m.ready, players: m.players, joining: m.joining.length, perf: m.perf, ai: m.ai })),
     };
   }
 
@@ -85,7 +78,7 @@ export class Matchmaker extends DurableObject {
   async alarm() {
     const now = Date.now();
     this.place(now);
-    await Promise.all([...this.matches.values()].map((m) => this.runLobby(m, now)));
+    await Promise.all([...this.matches.values()].map((m) => this.runMatch(m, now)));
     if (Math.floor(now / 1000) % 3 === 0) {
       for (const e of this.tickets.values()) e.ws.send(JSON.stringify({ type: 'status', waitedS: Math.round((now - e.ticket.enqueuedAt) / 1000), inQueue: this.tickets.size }));
     }
@@ -94,32 +87,33 @@ export class Matchmaker extends DurableObject {
 
   // Queue -> matches.
   place(now) {
-    // Open to new players: a server that answers (or is still booting), in its
-    // lobby or early in play.
+    // Open to new players: a server that answers (or is still booting) with
+    // room for another human. Its teams, for the pass, are the humans in it
+    // and those on their way, split evenly.
     const alive = (m) => (m.ready ? now - (m.lastOkAt || 0) < 10000 : now - m.startedAt < 2 * 60000);
-    const open = [...this.matches.values()].filter((m) => alive(m) && (!m.lobby || m.lobby.state !== 'live' || now - m.liveAt < m.durationMs / 2));
+    const open = [...this.matches.values()].filter(alive).map((m) => {
+      const humans = [...m.players, ...m.joining.map((j) => j.id)];
+      return { ...m, teams: [humans.filter((_, i) => i % 2 === 0), humans.filter((_, i) => i % 2 === 1)] };
+    });
     const { backfills, newMatches } = pass({
       tickets: [...this.tickets.values()].map((e) => e.ticket),
       matches: open,
       now,
-      // Place everyone at once: lobbies fill up; the lobby decides when to start.
       config: { region: this.region, minPlayers: 1, botFillAfterMs: 0, minHumansForBots: 1, pingStartMs: 1000, pingMaxMs: 1000 },
     });
     for (const b of backfills) {
       const m = this.matches.get(b.matchId), e = this.tickets.get(b.ticketId);
-      if (!m || !e) continue;
-      m.teams[b.team].push(...e.ticket.players.map((p) => p.id));
-      this.send(e, m, b.team);
+      if (m && e) this.send(e, m, b.team, now);
     }
     for (const nm of newMatches) {
       const id = `m-${this.region}-${crypto.randomUUID().slice(0, 8)}`;
-      const match = { id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: MATCH_MINUTES * 60000, maxPlayers: 16, lobby: null, ready: false, waiting: [], failing: [], players: [], map: null, matchMap: pickMatchMap() };
+      const match = { id, region: nm.region, mus: {}, startedAt: now, durationMs: 0, maxPlayers: HUMANS_PER_MATCH, ready: false, waiting: [], failing: [], joining: [], players: [], map: null, maps: mapRotation() };
       this.matches.set(id, match);
-      console.log(`new match ${id} (${match.matchMap}): starting its server`);
+      console.log(`new match ${id} (${match.maps[0]}): starting its server`);
       this.startServer(match, now);
       for (const tid of nm.tickets) {
         const e = this.tickets.get(tid);
-        if (e) this.send(e, match, nm.teams[0].includes(e.ticket.players[0].id) ? 0 : 1);
+        if (e) this.send(e, match, nm.teams[0].includes(e.ticket.players[0].id) ? 0 : 1, now);
       }
     }
   }
@@ -129,7 +123,7 @@ export class Matchmaker extends DurableObject {
   startServer(match, now) {
     match.lastStartAt = now;
     const start = async () => {
-      const envVars = { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: match.matchMap };
+      const envVars = { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAPS: match.maps.join(',') };
       if (this.env.BOT_BRAIN && this.env.BOT_BRAIN !== 'off') {
         // The bots' brain calls the models through /ai/<match> (ai.js).
         envVars.REBEL_BOT_BRAIN = this.env.BOT_BRAIN;
@@ -141,8 +135,8 @@ export class Matchmaker extends DurableObject {
     this.ctx.waitUntil(start().catch((err) => console.log(`start ${match.id}: ${err}`)));
   }
 
-  // A match whose server never came up (no capacity, a broken start): the
-  // waiting players hear why, and the server is cleaned up.
+  // A match whose server never came up (no capacity, a broken start) or
+  // died: the waiting players hear why, and the server is cleaned up.
   abandon(m, reason) {
     console.log(`${m.id}: abandoned (${reason})`);
     if (m.lastLog) console.log(`${m.id}: its last log lines:\n${m.lastLog.slice(-25).join('\n')}`);
@@ -153,8 +147,9 @@ export class Matchmaker extends DurableObject {
   }
 
   // A player goes to their match once its server has the map loaded.
-  send(entry, match, team) {
+  send(entry, match, team, now) {
     this.tickets.delete(entry.ticket.id);
+    match.joining.push({ id: entry.ticket.id, at: now });
     const go = () => {
       try {
         entry.ws.send(JSON.stringify({ type: 'match', room: match.id, server: '10.0.0.1:4848', team }));
@@ -173,8 +168,9 @@ export class Matchmaker extends DurableObject {
     }
   }
 
-  // One match: read its server's status, run its lobby.
-  async runLobby(m, now) {
+  // One match: read its server's status; bots on once it's up; stop it when
+  // no humans are left.
+  async runMatch(m, now) {
     let s;
     try {
       const res = await this.server(m.id).fetch(new Request('http://container/'));
@@ -187,43 +183,26 @@ export class Matchmaker extends DurableObject {
     }
     m.lastOkAt = now;
     m.lastLog = s.log; // kept for when the server dies (printed by abandon)
+    m.map = s.map;
+    m.perf = s.perf;
+    m.ai = s.ai;
+    // Humans on their way: until they show up in the game (3 minutes at most).
+    const arrived = (s.players || []).length - m.players.length;
+    if (arrived > 0) m.joining.splice(0, arrived);
+    m.joining = m.joining.filter((j) => now - j.at < 3 * 60000);
     m.players = s.players || [];
-    if (s.map !== m.map) {
-      m.map = s.map;
-      if (s.map === LOBBY_MAP) m.lobby = { state: 'lobby', openedAt: now, players: m.players.length };
-    }
-    if (s.map === LOBBY_MAP && s.loaded && !s.warmup) {
-      await this.console(m, 'warmup on');
-      if (this.lobbyConfig.botFill) await this.console(m, `bot_fill ${this.lobbyConfig.botFill}`);
-    }
     if (s.loaded && !m.ready) {
       m.ready = true;
+      if (this.botFill) await this.console(m, `bot_fill ${this.botFill}`);
       for (const go of m.waiting.splice(0)) go();
       m.failing.length = 0;
     }
-    if (!m.lobby) return;
-    m.lobby.players = m.players.length;
-    for (const a of lobbyTick(m.lobby, now, this.lobbyConfig)) {
-      if (a.type === 'message') await this.console(m, `msg ${a.text}`);
-      if (a.type === 'start') {
-        console.log(`${m.id}: match starts (${m.players.length} players)`);
-        m.liveAt = now;
-        await this.console(m, 'warmup off');
-        await this.console(m, 'gameover');
-      }
-    }
-    // No humans: stop the server soon (it costs while it runs; bots only play
-    // with humans). A lobby gets 90 s for the players sent to it to load in.
-    if (m.players.length || m.waiting.length) m.lastSeenPlayersAt = now;
-    if (m.lobby.state !== 'live' && now - (m.lastSeenPlayersAt || m.startedAt) > 90000) {
-      console.log(`${m.id}: lobby empty, stopping`);
-      this.matches.delete(m.id);
-      this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));
-      return;
-    }
-    // Everyone left the match: stop the server.
-    if (m.lobby.state === 'live' && !m.players.length && now - m.liveAt > 60000 && now - (m.lastSeenPlayersAt || 0) > 30000) {
-      console.log(`${m.id}: empty, stopping`);
+    // No humans: stop the server (it costs while it runs; bots only play with
+    // humans). The first ones get 90 s to load in; after that, 30 s.
+    if (m.players.length || m.joining.length) m.lastSeenPlayersAt = now;
+    if (m.players.length) m.hadPlayers = true;
+    if (now - (m.lastSeenPlayersAt || m.startedAt) > (m.hadPlayers ? 30000 : 90000)) {
+      console.log(`${m.id}: no players, stopping`);
       this.matches.delete(m.id);
       await this.server(m.id).stop().catch(() => {});
       this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));

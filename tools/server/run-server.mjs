@@ -39,9 +39,10 @@ const { values: opt } = parseArgs({
     bin: { type: 'string', default: join(engine, 'build/wasm-release/bin') },
     work: { type: 'string', default: '/tmp/rebel-server' },
     map: { type: 'string', default: process.env.REBEL_MAP || 'C&C_Field.mix' },
-    // With a lobby (local-service.mjs): --map is the warmup map and the
-    // rotation continues to --next-map, the match itself.
     'next-map': { type: 'string', default: process.env.REBEL_NEXT_MAP },
+    // The rotation, comma-separated (the matchmaker's random order; loops).
+    // Default: --map, then --next-map.
+    maps: { type: 'string', default: process.env.REBEL_MAPS },
     players: { type: 'string', default: '16' },
     name: { type: 'string', default: 'Open Commando' },
     port: { type: 'string', default: '4848' },
@@ -79,6 +80,7 @@ const mirror = (from, to) => {
 };
 if (!opt['in-place']) mirror(opt.game, game);
 
+const rotation = opt.maps ? opt.maps.split(',').filter(Boolean) : [opt.map, opt['next-map']].filter(Boolean);
 writeFileSync(join(game, 'server.ini'), `[Server]
 Config = svrcfg_open.ini
 GameType = LAN
@@ -92,10 +94,8 @@ AllowRemoteAdmin = false
 `);
 writeFileSync(join(game, 'Data', 'svrcfg_open.ini'), `[Settings]
 ConfigName=Open Commando
-MapName=${opt.map}
-MapName00=${opt.map}
-${opt['next-map'] ? `MapName01=${opt['next-map']}
-` : ''}TimeLimitMinutes=${opt.minutes}
+MapName=${rotation[0]}
+${rotation.map((m, i) => `MapName${String(i).padStart(2, '0')}=${m}\n`).join('')}TimeLimitMinutes=${opt.minutes}
 RadarMode=1
 IsAutoRestart=yes
 IsPassworded=no
@@ -103,7 +103,7 @@ IsDedicated=yes
 IsQuickMatch=no
 IsLaddered=no
 UseLagReduction=yes
-RemixTeams=yes
+RemixTeams=no
 CanRepairBuildings=yes
 DriverIsAlwaysGunner=yes
 SpawnWeapons=no

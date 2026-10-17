@@ -642,7 +642,6 @@ function showLife(service) {
     try {
       const s = await (await fetch(http + '/stats')).json();
       const parts = [`<b>${plural(s.online, 'player', 'players')} online</b>`];
-      if (s.inLobbies) parts.push(`${s.inLobbies} in a lobby`);
       if (s.queued) parts.push(`${s.queued} finding a match`);
       if (s.matches) parts.push(`${plural(s.matches, 'match', 'matches')} live`);
       el.innerHTML = `<span class="dot"></span>${parts.join(' · ')}`;

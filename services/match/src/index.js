@@ -79,7 +79,7 @@ async function chooseRegion(env, url) {
   const best = pings[ranked[0]];
   const near = ranked.filter((r) => pings[r] <= best + 60 && pings[r] <= Math.max(150, best));
   if (near.length < 2) return ranked[0];
-  const busy = await Promise.all(near.map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).then((s) => s.queue.length + s.matches.filter((m) => m.lobby?.state !== 'live').reduce((n, m) => n + m.players.length + 1, 0)).catch(() => 0)));
+  const busy = await Promise.all(near.map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).then((s) => s.queue.length + s.matches.reduce((n, m) => n + m.players.length + (m.joining || 0), 0)).catch(() => 0)));
   // Most players wins; a tie goes to the earlier region in REGIONS (so
   // players queueing at the same moment agree).
   const order = Object.keys(REGIONS);
@@ -118,15 +118,12 @@ export default {
       ]);
       const matches = regions.flatMap((s) => s?.matches || []);
       const queued = regions.reduce((n, s) => n + (s?.queue.length || 0), 0);
-      const inLobbies = matches.filter((m) => m.lobby && m.lobby.state !== 'live').reduce((n, m) => n + m.players.length, 0);
-      const live = matches.filter((m) => m.lobby?.state === 'live');
+      const live = matches.filter((m) => m.players.length);
       const inMatches = live.reduce((n, m) => n + m.players.length, 0);
       return json({
-        online: presence.visitors + queued + inLobbies + inMatches,
+        online: presence.visitors + queued + inMatches,
         onFrontScreen: presence.visitors,
         queued,
-        inLobbies,
-        lobbies: matches.filter((m) => m.lobby && m.lobby.state !== 'live').length,
         inMatches,
         matches: live.length,
         regions: Object.fromEntries(Object.keys(REGIONS).map((r, i) => [r, (regions[i]?.matches || []).reduce((n, m) => n + m.players.length, 0)])),

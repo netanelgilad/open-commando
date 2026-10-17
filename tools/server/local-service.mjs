@@ -3,17 +3,15 @@
 // does on Cloudflare (matchmaker, rooms, a server per match), with local
 // processes instead of Durable Objects and containers.
 //
-//   node tools/server/local-service.mjs [--port 8790] [--start-players 8]
-//        [--lobby-wait 90] [--lobby-map C&C_Field.mix] [--map C&C_Volcano.mix]
+//   node tools/server/local-service.mjs [--port 8790] [--bots 6] [--map C&C_Volcano.mix]
 //
 //   GET /play?name=<nick>   WebSocket: queue; {"type":"match","room",...} when placed
 //   GET /room/<id>          WebSocket: a match room (web/net.js frames)
-//   GET /status             JSON: queue, matches and their lobbies
+//   GET /status             JSON: queue and matches
 //
-// Players are placed in a match at once (a new one, or one still in its
-// lobby or early in play: backfill). The match server opens in warmup on
-// the lobby map (services/match/src/lobby.js): fight and respawn while it
-// fills; then "warmup off" + "gameover" move everyone to the match map.
+// Players are placed at once in a running match with room for another human,
+// or a new one. Match servers play real C&C games map after map; bots fill
+// each game to --bots players and each human takes a bot's place.
 // Pages: http://127.0.0.1:8461/?online=http://127.0.0.1:8790
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -23,65 +21,46 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createHub } from './net-hub.mjs';
 import { pass } from '../../services/match/src/matchmaker.js';
-import { lobbyTick } from '../../services/match/src/lobby.js';
-import { LOBBY_MAP, pickMatchMap } from '../../services/match/src/maps.js';
+import { mapRotation } from '../../services/match/src/maps.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const { values: opt } = parseArgs({
   options: {
     port: { type: 'string', default: '8790' },
-    'start-players': { type: 'string', default: '8' },
-    'min-players': { type: 'string', default: '2' },
-    'lobby-wait': { type: 'string', default: '90' },
-    countdown: { type: 'string', default: '10' },
     bots: { type: 'string', default: '6' }, // bots keep each game at this many players (0: none)
-    'lobby-map': { type: 'string', default: LOBBY_MAP },
-    map: { type: 'string' }, // default: a random C&C map per match
+    map: { type: 'string' }, // the first map (default: a random rotation)
     bin: { type: 'string' },
   },
 });
-const lobbyConfig = {
-  startPlayers: +opt['start-players'],
-  minPlayers: +opt['min-players'],
-  lobbyWaitMs: +opt['lobby-wait'] * 1000,
-  countdownMs: +opt.countdown * 1000,
-  botFill: +opt.bots,
-};
+const HUMANS_PER_MATCH = 8;
 const t0 = Date.now();
 const log = (t) => console.log(`${((Date.now() - t0) / 1000).toFixed(1)} ${t}`);
 
 const hub = createHub();
 const tickets = new Map(); // id -> { ticket, ws }
-const matches = new Map(); // id -> { id, teams, startedAt, durationMs, maxPlayers, region, mus, proc, lobby, players:Set }
+const matches = new Map(); // id -> { id, maps, startedAt, maxPlayers, region, mus, proc, players: Set, joining, waiting, ready }
 
 function startServer(match) {
   const args = [join(here, 'run-server.mjs'), '--net', `ws://127.0.0.1:${opt.port}/room/${match.id}`,
-    '--map', opt['lobby-map'], '--next-map', match.matchMap, '--work', `/tmp/rebel-server-${match.id}`, '--name', `Open Commando ${match.id}`];
+    '--maps', match.maps.join(','), '--work', `/tmp/rebel-server-${match.id}`, '--name', `Open Commando ${match.id}`];
   if (opt.bin) args.push('--bin', opt.bin);
   const proc = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   match.proc = proc;
-  const lobbyMap = opt['lobby-map'].replace(/\.mix$/i, '');
   let buffer = '';
   const onLine = (line) => {
     if (/\[net\] rtt|Load \d+%/.test(line)) return;
-    if (/joined the game|left the game|Loading level|Warmup|Gameplay|Match|Lobby|abort|Assert/.test(line)) log(`${match.id}: ${line}`);
+    if (/joined the game|left the game|\[BOT\]|Loading level|Gameplay|abort|Assert|\[brain\]/.test(line)) log(`${match.id}: ${line}`);
     let m;
-    if ((m = /Player (\S+) joined the game/.exec(line))) match.players.add(m[1]);
-    if ((m = /Player (\S+) left the game/.exec(line))) match.players.delete(m[1]);
-    if ((m = /Loading level (\S+)/.exec(line))) {
-      match.map = m[1];
-      if (m[1].replace(/\.mix$/i, '') === lobbyMap) {
-        // The lobby map (first start, and again after each match).
-        match.lobby = { state: 'lobby', openedAt: Date.now(), players: match.players.size };
-      }
+    if ((m = /Player (\S+) joined the game/.exec(line))) {
+      match.players.add(m[1]);
+      match.joining.shift();
     }
-    if (/Level loaded OK/.test(line) && match.lobby?.state === 'lobby') {
-      proc.stdin.write('warmup on\n'); // once loaded: the console is up by then
-      if (lobbyConfig.botFill) proc.stdin.write(`bot_fill ${lobbyConfig.botFill}\n`);
-      if (!match.ready) {
-        match.ready = true;
-        for (const send of match.waiting.splice(0)) send(); // players waiting for the server
-      }
+    if ((m = /Player (\S+) left the game/.exec(line))) match.players.delete(m[1]);
+    if ((m = /Loading level (\S+)/.exec(line))) match.map = m[1];
+    if (/Level loaded OK/.test(line) && !match.ready) {
+      if (opt.bots > 0) proc.stdin.write(`bot_fill ${opt.bots}\n`); // once loaded: the console is up by then
+      match.ready = true;
+      for (const send of match.waiting.splice(0)) send(); // players waiting for the server
     }
   };
   const read = (d) => {
@@ -98,12 +77,11 @@ function startServer(match) {
   });
 }
 
-const console_ = (match, line) => match.proc && match.proc.stdin.write(line + '\n');
-
 // Tell a player where to go once the match's server has its map loaded
 // (joining earlier works too, but the engine's connect attempts time out).
 function place(entry, match, team) {
   tickets.delete(entry.ticket.id);
+  match.joining.push(Date.now());
   const send = () => {
     entry.ws.send(JSON.stringify({ type: 'match', room: match.id, server: '10.0.0.1:4848', team }));
     entry.ws.close(1000, 'matched');
@@ -114,8 +92,12 @@ function place(entry, match, team) {
 
 setInterval(() => {
   const now = Date.now();
-  // Matches still open to new players: in their lobby, or early in play.
-  const open = [...matches.values()].filter((m) => !m.lobby || m.lobby.state !== 'live' || now - m.liveAt < m.durationMs / 2);
+  // Open to new players: room for another human (in it, or on their way).
+  for (const m of matches.values()) m.joining = m.joining.filter((at) => now - at < 3 * 60000);
+  const open = [...matches.values()].map((m) => {
+    const humans = [...m.players, ...m.joining.map((_, i) => `joining${i}`)];
+    return { ...m, teams: [humans.filter((_, i) => i % 2 === 0), humans.filter((_, i) => i % 2 === 1)] };
+  });
   const { backfills, newMatches } = pass({
     tickets: [...tickets.values()].map((e) => e.ticket),
     matches: open,
@@ -125,15 +107,16 @@ setInterval(() => {
   for (const b of backfills) {
     const m = matches.get(b.matchId), e = tickets.get(b.ticketId);
     if (!m || !e) continue;
-    m.teams[b.team].push(...e.ticket.players.map((p) => p.id));
-    log(`${e.ticket.players[0].name} -> ${m.id} (joins the ${m.lobby?.state || 'booting'} match)`);
+    log(`${e.ticket.players[0].name} -> ${m.id} (${m.ready ? m.map : 'booting'})`);
     place(e, m, b.team);
   }
   for (const nm of newMatches) {
     const id = 'm' + Math.random().toString(36).slice(2, 8);
-    const match = { matchMap: opt.map || pickMatchMap(), id, region: nm.region, teams: nm.teams, mus: {}, startedAt: now, durationMs: 30 * 60000, maxPlayers: 16, players: new Set(), waiting: [], lobby: null, ready: false };
+    const maps = mapRotation();
+    if (opt.map) maps.unshift(opt.map);
+    const match = { maps, id, region: nm.region, mus: {}, startedAt: now, durationMs: 0, maxPlayers: HUMANS_PER_MATCH, players: new Set(), joining: [], waiting: [], ready: false };
     matches.set(id, match);
-    log(`new match ${id}, starting its server (lobby ${opt['lobby-map']}, then ${match.matchMap})`);
+    log(`new match ${id}, starting its server (${maps[0]})`);
     startServer(match);
     for (const tid of nm.tickets) {
       const e = tickets.get(tid);
@@ -143,18 +126,14 @@ setInterval(() => {
       }
     }
   }
-  // Lobbies.
+  // No humans: stop the server (the first ones get 90 s to load in, then 30 s).
   for (const m of matches.values()) {
-    if (!m.lobby) continue;
-    m.lobby.players = m.players.size;
-    for (const a of lobbyTick(m.lobby, now, lobbyConfig)) {
-      if (a.type === 'message') console_(m, `msg ${a.text}`); // chat line (amsg is a modal popup)
-      if (a.type === 'start') {
-        log(`${m.id}: match starts (${m.players.size} players)`);
-        m.liveAt = now;
-        console_(m, 'warmup off');
-        console_(m, 'gameover');
-      }
+    if (m.players.size || m.joining.length) m.lastSeenAt = now;
+    if (m.players.size) m.hadPlayers = true;
+    if (now - (m.lastSeenAt || m.startedAt) > (m.hadPlayers ? 30000 : 90000)) {
+      log(`${m.id}: no players, stopping`);
+      m.proc?.kill();
+      matches.delete(m.id);
     }
   }
   // Waiting players hear how it's going.
@@ -168,8 +147,7 @@ const http = createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
     return res.end(JSON.stringify({
       queue: [...tickets.values()].map((e) => e.ticket.players[0].name),
-      lobbyMap: opt['lobby-map'],
-      matches: [...matches.values()].map((m) => ({ id: m.id, map: m.map, matchMap: m.matchMap, ready: m.ready, lobby: m.lobby && { state: m.lobby.state, players: m.lobby.players }, players: [...m.players] })),
+      matches: [...matches.values()].map((m) => ({ id: m.id, map: m.map, ready: m.ready, players: [...m.players], joining: m.joining.length })),
     }, null, 2));
   }
   res.writeHead(404);

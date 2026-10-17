@@ -66,12 +66,8 @@
   ],
   "vars": {
     "PUBLIC_WSS": "wss://open-commando-match.netanelgilad.workers.dev",
-    // Lobby: a match starts at START_PLAYERS, or once it has had MIN_PLAYERS
-    // for LOBBY_WAIT_S; bots keep every game at BOT_FILL players (so a single
-    // visitor gets a match too).
-    "START_PLAYERS": "4",
-    "MIN_PLAYERS": "1",
-    "LOBBY_WAIT_S": "60",
+    // Bots keep every game at BOT_FILL players; each human takes a bot's
+    // place (so a single visitor gets a full match too).
     "BOT_FILL": "6",
     // The bots' brain on match servers: off, scripted, clef, hybrid
     // (tools/server/bot-brain.mjs); its model spend is capped per match

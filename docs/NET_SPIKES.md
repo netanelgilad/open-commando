@@ -550,3 +550,17 @@ Step 1 (this), no models yet:
   deploy` returns, so live tests right after a deploy fail for reasons
   that aren't bugs. The matchmaker now prints a dead server's last log
   lines, and servers log memory every 10 s.
+
+## S17: no lobby
+
+With bots there is no reason to wait: a match server starts straight on a
+real C&C map (a random rotation per server, looping; buildings can be
+destroyed), bots fill the game to BOT_FILL as soon as a human is in, and
+each human who joins takes a bot's place (bot_fill removes a bot from the
+bigger team). Players go into any running match with room for another
+human (8), or a new one; servers stop 30 s after their last human leaves
+(90 s if no one ever arrived). Teams are no longer remixed between maps
+(RemixTeams=no: the remix was why bots once shot their own team). The
+lobby (lobby.js, warmup, START_PLAYERS/MIN_PLAYERS/LOBBY_WAIT_S) is gone;
+`warmup` stays as a console command. Verified locally: one player straight
+into C&C_City with five bots; two players: four bots, 3 a side.
