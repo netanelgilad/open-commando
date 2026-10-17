@@ -495,3 +495,42 @@ Step 1 (this), no models yet:
   callouts as written lines, and a JSON-lines log of every decision.
 - Verified: 3v3 bots under the scripted brain fight and score (about 700
   decisions a minute); their team chat shows on a human's screen.
+
+## S16: the brain, steps 2-3 (Clef-flash decides, DeepSeek V4 Flash plans and talks)
+
+- Models run through the match service: `POST /ai/<match>` with the
+  Worker's Workers AI binding (`services/match/src/ai.js`: clef-flash,
+  clef, deepseek-v4-flash). A match server gets a key for its own match
+  only (HMAC of the match id with START_TOKEN) as REBEL_AI_KEY, with
+  REBEL_AI_URL, when the matchmaker starts it with BOT_BRAIN set; it holds
+  no Cloudflare credentials.
+- `--bot-brain clef`: Clef-flash answers each bot's questions (plan, move,
+  target, callout, rethink) 2-3 times a second in a fight or with the base
+  under attack, about once a second otherwise; bots decide in parallel; a
+  call over 1.5 s or failed gets the scripted answers. Clef rejects a
+  choice with one option: such questions are left out. Measured from a
+  home machine through the Worker: p50 ~330-410 ms, p90 ~450-510 ms (the
+  model alone is ~40 ms), ~1,000 input tokens a call.
+- `--bot-brain hybrid` adds the planner: DeepSeek V4 Flash (thinking off:
+  `chat_template_kwargs: {thinking: false}`; with it on, replies take
+  seconds and fill max_tokens with reasoning) writes each bot's 2-4 plans
+  (kind attack/defend/go/follow, checked against the map's buildings,
+  places and teammates), standing orders, a note, and maybe a line of team
+  chat, as JSON. Each bot has a persona. Called on spawn, death, being
+  named in chat (any human team line wakes one bot), Clef's "rethink",
+  and every 22-28 s; p50 3-4.5 s. Workers AI returned "Capacity
+  temporarily exceeded" for a while: failures fall back to scripted plans
+  and retry in 5 s.
+- Lessons from watching it: whether to shoot is not a question (Clef chose
+  "none" with enemies in sight 64% of the time: scoring stopped); it is a
+  reflex now, and the question is which target. Base defense guns (the
+  AGT's, the Obelisk's) are dropped from what bots "see". The language
+  model invents map features (tunnels, ridges) unless told only the
+  listed places exist, and talks far too much unless told players mostly
+  don't; bots' lines are rate-limited per team. "C&C is won by destroying
+  buildings" in the prompt moved plans from holding to attacking.
+- 3v3, 3 minutes, hybrid: 9-8 (scripted: about 7-4 a minute... in an
+  earlier, easier setup), ~1,000 Clef calls and ~35-45 planner calls;
+  about $1 a 30-minute match at list prices. Sample chat: "Nash, I'm
+  covering your flank on the WF. Keep shooting." / "On your six, Nash.
+  Keep burning." / "I'm hurt, pulling back a bit".

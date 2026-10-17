@@ -31,7 +31,8 @@ const { values: opt } = parseArgs({
   options: {
     net: { type: 'string', default: process.env.REBEL_NET },
     // Bots' brain (bot-brain.mjs): off (the engine's own goal loop), scripted, or
-    // clef (decisions by Clef-flash via REBEL_AI_URL with REBEL_AI_KEY).
+    // clef (decisions by Clef-flash via REBEL_AI_URL with REBEL_AI_KEY), or hybrid
+    // (Clef-flash decides, DeepSeek V4 Flash plans and talks).
     'bot-brain': { type: 'string', default: process.env.REBEL_BOT_BRAIN || 'off' },
     'bot-log': { type: 'string', default: process.env.REBEL_BOT_LOG }, // every decision, as JSON lines
     game: { type: 'string', default: process.env.REBEL_GAME_DIR || resolve(engine, '../game-data/renegade') },
