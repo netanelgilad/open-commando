@@ -144,7 +144,7 @@ async function nodeServer() {
     for (const t of d.toString().split('\n').filter(Boolean)) {
       p.lines.push(`${stamp()} ${t}`);
       if (/Gameplay Pending|Gameplay in progress/i.test(t)) ready = true;
-      if (/\[net\]|abort|Assert|[Cc]lient|[Pp]layer|GDI :|NOD :|Gameplay/.test(t)) console.log(`${stamp()} server: ${t}`.slice(0, 260));
+      if (/\[net\]|\[mem\]|\[brain\]|\[nav\]|Loading level|abort|Assert|[Cc]lient|[Pp]layer|GDI :|NOD :|Gameplay/.test(t)) console.log(`${stamp()} server: ${t}`.slice(0, 260));
     }
   };
   proc.stdout.on('data', onData);

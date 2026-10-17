@@ -145,6 +145,7 @@ export class Matchmaker extends DurableObject {
   // waiting players hear why, and the server is cleaned up.
   abandon(m, reason) {
     console.log(`${m.id}: abandoned (${reason})`);
+    if (m.lastLog) console.log(`${m.id}: its last log lines:\n${m.lastLog.slice(-25).join('\n')}`);
     this.matches.delete(m.id);
     for (const fail of m.failing.splice(0)) fail(reason);
     m.waiting.length = 0;
@@ -185,6 +186,7 @@ export class Matchmaker extends DurableObject {
       return;
     }
     m.lastOkAt = now;
+    m.lastLog = s.log; // kept for when the server dies (printed by abandon)
     m.players = s.players || [];
     if (s.map !== m.map) {
       m.map = s.map;

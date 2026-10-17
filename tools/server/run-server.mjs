@@ -209,3 +209,8 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { console.log(`${
 // and traffic, every 10 s.
 setInterval(() => net.probe(), 200).unref();
 setInterval(() => out(`[net] rtt ${JSON.stringify(net.probeStats())} ${JSON.stringify(net.stats)}`), 10000).unref();
+// Memory, every 10 s (containers have a fixed allowance; wasm memory only grows).
+setInterval(() => {
+  const m = process.memoryUsage();
+  out(`[mem] rss ${Math.round(m.rss / 2 ** 20)} MB, wasm ${Math.round((gameModule?.HEAPU16?.buffer.byteLength || 0) / 2 ** 20)} MB, js heap ${Math.round(m.heapUsed / 2 ** 20)} MB`);
+}, 10000).unref();
