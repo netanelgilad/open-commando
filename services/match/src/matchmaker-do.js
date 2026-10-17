@@ -14,13 +14,20 @@
 //
 // The page then opens /room/<id> and starts the game with
 // +connect 10.0.0.1:4848 (docs/NET_SPIKES.md, S4).
+//
+//   GET /history         the region's last matches (a summary each)
+//   GET /history/<id>    one match: a sample every 10 s (map, humans, bots,
+//                        fps, timer lateness, memory, AI spend) and, once it
+//                        ended, how and the server's last log lines
 import { DurableObject } from 'cloudflare:workers';
 import { pass } from './matchmaker.js';
 import { mapRotation } from './maps.js';
 import { REGIONS } from './regions.js';
 import { aiKey } from './ai.js';
 
-const HUMANS_PER_MATCH = 8; // bots make up the rest (BOT_FILL)
+const HUMANS_PER_MATCH = 32; // as C&C servers commonly ran (16 a side); bots top games up to BOT_FILL
+const SAMPLE_EVERY_MS = 10000; // match history: one sample every 10 s
+const HISTORY_MATCHES = 50; // matches kept per region
 
 export class Matchmaker extends DurableObject {
   constructor(ctx, env) {
@@ -35,6 +42,13 @@ export class Matchmaker extends DurableObject {
     const url = new URL(request.url);
     this.region ??= REGIONS[url.searchParams.get('region')] ? url.searchParams.get('region') : 'weur';
     if (url.pathname === '/status') return Response.json(this.status());
+    if (url.pathname === '/history') return Response.json((await this.ctx.storage.get('history')) || []);
+    const h = /^\/history\/([\w-]+)$/.exec(url.pathname);
+    if (h) {
+      const live = this.matches.get(h[1]);
+      const rec = live ? this.record(live) : await this.ctx.storage.get(`match:${h[1]}`);
+      return rec ? Response.json(rec) : new Response('not found', { status: 404 });
+    }
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();
     const id = crypto.randomUUID();
@@ -140,7 +154,7 @@ export class Matchmaker extends DurableObject {
   abandon(m, reason) {
     console.log(`${m.id}: abandoned (${reason})`);
     if (m.lastLog) console.log(`${m.id}: its last log lines:\n${m.lastLog.slice(-25).join('\n')}`);
-    this.matches.delete(m.id);
+    this.end(m, reason);
     for (const fail of m.failing.splice(0)) fail(reason);
     m.waiting.length = 0;
     this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));
@@ -168,6 +182,40 @@ export class Matchmaker extends DurableObject {
     }
   }
 
+  // A match's history record: its samples, and how it ended.
+  record(m) {
+    const samples = m.samples || [];
+    return {
+      id: m.id,
+      region: this.region,
+      startedAt: m.startedAt,
+      endedAt: m.endedAt || null,
+      end: m.endReason || null,
+      maps: [...new Set(samples.map((x) => x.map).filter(Boolean))],
+      peakHumans: Math.max(0, ...samples.map((x) => x.humans)),
+      aiUsd: samples.at(-1)?.aiUsd ?? null,
+      minFps: samples.length ? Math.min(...samples.map((x) => x.fps ?? 99)) : null,
+      samples,
+      lastLog: m.endedAt ? m.lastLog || [] : undefined,
+    };
+  }
+
+  // A match is over: keep its record (the last HISTORY_MATCHES), forget it.
+  end(m, reason) {
+    this.matches.delete(m.id);
+    m.endedAt = Date.now();
+    m.endReason = reason;
+    const rec = this.record(m);
+    const save = async () => {
+      await this.ctx.storage.put(`match:${m.id}`, rec);
+      const { samples, lastLog, ...summary } = rec;
+      const history = [summary, ...((await this.ctx.storage.get('history')) || []).filter((x) => x.id !== m.id)];
+      for (const old of history.splice(HISTORY_MATCHES)) await this.ctx.storage.delete(`match:${old.id}`);
+      await this.ctx.storage.put('history', history);
+    };
+    this.ctx.waitUntil(save().catch((e) => console.log(`${m.id}: history: ${e}`)));
+  }
+
   // One match: read its server's status; bots on once it's up; stop it when
   // no humans are left.
   async runMatch(m, now) {
@@ -183,6 +231,11 @@ export class Matchmaker extends DurableObject {
     }
     m.lastOkAt = now;
     m.lastLog = s.log; // kept for when the server dies (printed by abandon)
+    if (now - (m.lastSampleAt || 0) >= SAMPLE_EVERY_MS) {
+      m.lastSampleAt = now;
+      (m.samples ??= []).push({ t: now, map: s.map, humans: (s.players || []).length, bots: s.bots ?? null, fps: s.perf?.fps ?? null, lateMs: s.perf?.lagMaxMs ?? null, rssMb: s.perf?.rssMb ?? null, aiUsd: s.ai?.usd ?? null });
+      if (m.samples.length % 6 === 0) this.ctx.waitUntil(this.ctx.storage.put(`match:${m.id}`, this.record(m))); // a minute's worth
+    }
     m.map = s.map;
     m.perf = s.perf;
     m.ai = s.ai;
@@ -203,7 +256,7 @@ export class Matchmaker extends DurableObject {
     if (m.players.length) m.hadPlayers = true;
     if (now - (m.lastSeenPlayersAt || m.startedAt) > (m.hadPlayers ? 30000 : 90000)) {
       console.log(`${m.id}: no players, stopping`);
-      this.matches.delete(m.id);
+      this.end(m, 'no players left');
       await this.server(m.id).stop().catch(() => {});
       this.ctx.waitUntil(this.server(m.id).destroy().catch(() => {}));
     }

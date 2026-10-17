@@ -12,6 +12,7 @@
 //   POST /ai/<id>                  the bots' models for match <id> (Workers AI), for its
 //                                  server: {model, input} with the match's key (aiKey)
 //   GET  /match/<id>               a match server's status
+//   GET  /history[/<id>]           recent matches; one match's samples (matchmaker-do.js)
 //
 // Regions are Cloudflare's container placement regions. A match id carries
 // its region ("m-weur-1a2b3c4d"); the region's matchmaker, the match's room
@@ -147,6 +148,13 @@ export default {
         return json({ ms: Date.now() - t0, error: String(e) }, 502);
       }
     }
+    if (url.pathname === '/history') {
+      // Every region's last matches, newest first.
+      const all = await Promise.all(Object.keys(REGIONS).map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/history?region=${r}`)).then((res) => res.json()).catch(() => [])));
+      return json(all.flat().sort((a, b) => b.startedAt - a.startedAt));
+    }
+    const hist = /^\/history\/([\w-]{1,64})$/.exec(url.pathname);
+    if (hist) return matchmaker(env, regionOf(hist[1])).fetch(new Request(`${url.origin}/history/${hist[1]}?region=${regionOf(hist[1])}`)).then(async (res) => (res.ok ? json(await res.json()) : res));
     const room = /^\/room\/([\w-]{1,64})$/.exec(url.pathname);
     if (room) {
       if (!wantsSocket(request)) return new Response('websocket expected', { status: 426 });

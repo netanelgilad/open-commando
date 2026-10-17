@@ -27,6 +27,9 @@
 #include "playertype.h"
 #include "wwmath.h"
 #include "navgrid_web.h"
+#include "vendor.h"
+#include "purchasesettings.h"
+#include "basecontroller.h"
 #include "sctextobj.h"
 #include "vehicle.h"
 #include "damage.h"
@@ -204,10 +207,13 @@ void Think_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
 // One order to the soldier: walk to `move` (or stand), shooting at the
 // target if there is one.
 void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
+  // In a vehicle, the vehicle takes the orders (it has its own action: the
+  // engine's vehicle AI drives it there).
+  SmartGameObj *actor = s->Get_Vehicle() ? (SmartGameObj *)s->Get_Vehicle() : (SmartGameObj *)s;
   ActionParamsStruct params;
   params.Set_Basic((long)0, 60, 7000 + (-b.id));
   if (move) {
-    params.Set_Movement(*move, 1.0f, 1.0f);
+    params.Set_Movement(*move, 1.0f, actor == s ? 1.0f : 3.0f);
     params.MovePathfind = false;
   }
   PhysicalGameObj *target = b.targetId ? GameObjManager::Find_PhysicalGameObj(b.targetId) : nullptr;
@@ -215,12 +221,12 @@ void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
     target = nullptr;
   if (target) {
     params.Set_Attack(target, 80.0f, 0.5f, true);
-    b.accepted = s->Get_Action()->Attack(params);
+    b.accepted = actor->Get_Action()->Attack(params);
   } else if (b.shootAt) {
     params.Set_Attack(b.shootPoint, 80.0f, 1.0f, true);
-    b.accepted = s->Get_Action()->Attack(params);
+    b.accepted = actor->Get_Action()->Attack(params);
   } else if (move) {
-    b.accepted = s->Get_Action()->Goto(params);
+    b.accepted = actor->Get_Action()->Goto(params);
   }
 }
 
@@ -228,9 +234,10 @@ void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
 // engine's planner can't plan on these maps); replan when stuck.
 void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
   size_t before = b.wp;
+  const float reach = s->Get_Vehicle() ? 4.0f : 1.5f; // a vehicle can't stop on a spot
   while (b.wp < b.path.size()) {
     Vector3 d = b.path[b.wp] - me;
-    if (d.X * d.X + d.Y * d.Y > 1.5f * 1.5f || fabsf(d.Z) > 2.5f)
+    if (d.X * d.X + d.Y * d.Y > reach * reach || fabsf(d.Z) > 2.5f)
       break;
     b.wp++;
   }
@@ -252,6 +259,13 @@ void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
       ahead.Z = 0;
       if (ahead.Length() > 0.1f)
         NavGrid::Block(me + ahead * (1.0f / ahead.Length()), 1.0f);
+      if (s->Get_Vehicle() && b.stuckRow >= 4) {
+        // A vehicle that can't get on (the walking grid is made for soldiers):
+        // out, and on foot.
+        s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
+        b.stuckRow = 0;
+        Say("%s leaves a stuck vehicle\n", b.name.c_str());
+      }
       if (b.stuckRow >= 3 && !Brain) {
         float a = (float)(rand() % 628) / 100.0f;
         Plan(b, me, me + Vector3(6.0f * cosf(a), 6.0f * sinf(a), 0));
@@ -394,6 +408,8 @@ public:
 //   bot_do <id> stop
 //   bot_do <id> target <object id>  shoot at a soldier/vehicle (0: stop)
 //   bot_do <id> shoot <x> <y> <z>   shoot at a point (a building)
+//   bot_do <id> buy character|vehicle <n>   (the team's shop, see "shop")
+//   bot_do <id> enter [vehicle]     get into the empty vehicle next to it (no id: the use key)
 //   bot_do <id> jump
 //   bot_do <id> say team|all <text>
 
@@ -519,7 +535,35 @@ void Emit_State(double now) {
     j += "}";
     first = false;
   }
-  j += "],\"bots\":[";
+  // What each team can buy (the purchase terminal's lists) and whether its
+  // base has power (prices double without it).
+  j += "],\"shop\":{";
+  for (int t = 0; t < 2; t++) {
+    int team = t == 0 ? PLAYERTYPE_GDI : PLAYERTYPE_NOD;
+    BaseControllerClass *base = BaseControllerClass::Find_Base(team);
+    snprintf(buf, sizeof(buf), "%s\"%s\":{\"powered\":%s", t ? "," : "", Team_Name(team), base && base->Is_Base_Powered() ? "true" : "false");
+    j += buf;
+    for (int kind = 0; kind < 2; kind++) {
+      j += kind == 0 ? ",\"characters\":[" : ",\"vehicles\":[";
+      PurchaseSettingsDefClass *def = PurchaseSettingsDefClass::Find_Definition(
+          kind == 0 ? PurchaseSettingsDefClass::TYPE_CLASSES : PurchaseSettingsDefClass::TYPE_VEHICLES,
+          t == 0 ? PurchaseSettingsDefClass::TEAM_GDI : PurchaseSettingsDefClass::TEAM_NOD);
+      bool any = false;
+      for (int i = 0; def && i < 10; i++) { // PurchaseSettingsDefClass::MAX_ENTRIES (protected)
+        if (!def->Get_Definition(i) || def->Get_Cost(i) <= 0)
+          continue;
+        snprintf(buf, sizeof(buf), "%s{\"index\":%d,\"cost\":%d,\"name\":", any ? "," : "", i, def->Get_Cost(i));
+        j += buf;
+        WideStringClass name(def->Get_Name(i));
+        Json_String(j, Narrow(name));
+        j += "}";
+        any = true;
+      }
+      j += "]";
+    }
+    j += "}";
+  }
+  j += "},\"bots\":[";
   first = true;
   for (Bot &b : Bots) {
     SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
@@ -570,7 +614,9 @@ public:
 class BotDoConsoleFunctionClass : public ConsoleFunctionClass {
 public:
   const char *Get_Name(void) override { return "bot_do"; }
-  const char *Get_Help(void) override { return "BOT_DO <id> go x y z|stop|target <obj>|shoot x y z|jump|say team|all <text>"; }
+  const char *Get_Help(void) override {
+    return "BOT_DO <id> go x y z|stop|target <obj>|shoot x y z|hold_fire|buy character|vehicle <n>|enter|jump|say team|all <text>";
+  }
   void Activate(const char *input) override {
     int id = 0, n = 0;
     char verb[16] = {0};
@@ -612,6 +658,33 @@ public:
     } else if (!strcmp(verb, "hold_fire")) {
       b.shootAt = false;
       b.targetId = 0;
+    } else if (!strcmp(verb, "buy") && s) {
+      // At a purchase terminal's prices, with the game's own checks (credits,
+      // the factory or barracks standing).
+      char what[16] = {0};
+      int index = -1;
+      if (sscanf(rest, "%15s %d", what, &index) != 2 || index < 0)
+        return;
+      bool vehicle = !strcmp(what, "vehicle");
+      VendorClass::PURCHASE_ERROR result =
+          VendorClass::Purchase_Item(s, vehicle ? VendorClass::TYPE_VEHICLE : VendorClass::TYPE_CHARACTER, index, -1, true);
+      static const char *RESULTS[] = {"bought", "pending", "no funds", "no factory", "not in stock"};
+      Say("%s buys %s %d: %s\n", b.name.c_str(), what, index, result >= 0 && result <= 4 ? RESULTS[result] : "failed");
+    } else if (!strcmp(verb, "enter") && s) {
+      // Into an empty vehicle next to it, the way the vehicle's door
+      // transition does (a bot can't aim for the door zone); "enter" alone
+      // is the use key (out of a vehicle).
+      int vid = atoi(rest);
+      PhysicalGameObj *o = vid ? GameObjManager::Find_PhysicalGameObj(vid) : nullptr;
+      VehicleGameObj *v = o ? o->As_VehicleGameObj() : nullptr;
+      Vector3 me, at;
+      s->Get_Position(&me);
+      if (v && !s->Get_Vehicle() && !v->Get_Driver() && (v->Get_Position(&at), (at - me).Length() < 8.0f)) {
+        v->Add_Occupant(s);
+        Say("%s gets in a %s\n", b.name.c_str(), v->Get_Definition().Get_Name());
+      } else if (!vid) {
+        s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
+      }
     } else if (!strcmp(verb, "jump")) {
       if (s)
         s->Set_Boolean_Control(ControlClass::BOOLEAN_JUMP);

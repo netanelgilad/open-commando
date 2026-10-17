@@ -68,7 +68,7 @@
     "PUBLIC_WSS": "wss://open-commando-match.netanelgilad.workers.dev",
     // Bots keep every game at BOT_FILL players; each human takes a bot's
     // place (so a single visitor gets a full match too).
-    "BOT_FILL": "6",
+    "BOT_FILL": "8",
     // The bots' brain on match servers: off, scripted, clef, hybrid
     // (tools/server/bot-brain.mjs); its model spend is capped per match
     // (REBEL_AI_BUDGET_USD, default $2).

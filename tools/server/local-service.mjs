@@ -3,7 +3,7 @@
 // does on Cloudflare (matchmaker, rooms, a server per match), with local
 // processes instead of Durable Objects and containers.
 //
-//   node tools/server/local-service.mjs [--port 8790] [--bots 6] [--map C&C_Volcano.mix]
+//   node tools/server/local-service.mjs [--port 8790] [--bots 8] [--map C&C_Volcano.mix]
 //
 //   GET /play?name=<nick>   WebSocket: queue; {"type":"match","room",...} when placed
 //   GET /room/<id>          WebSocket: a match room (web/net.js frames)
@@ -27,12 +27,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const { values: opt } = parseArgs({
   options: {
     port: { type: 'string', default: '8790' },
-    bots: { type: 'string', default: '6' }, // bots keep each game at this many players (0: none)
+    bots: { type: 'string', default: '8' }, // bots keep each game at this many players (0: none)
     map: { type: 'string' }, // the first map (default: a random rotation)
     bin: { type: 'string' },
   },
 });
-const HUMANS_PER_MATCH = 8;
+const HUMANS_PER_MATCH = 32;
 const t0 = Date.now();
 const log = (t) => console.log(`${((Date.now() - t0) / 1000).toFixed(1)} ${t}`);
 

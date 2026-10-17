@@ -36,10 +36,30 @@ const buildingName = (b) => {
   return b.name.replace(/^mp_|_/gi, ' ').trim();
 };
 const characterName = (preset) =>
-  (preset || 'soldier').replace(/^CnC_|^mp_/i, '').replace(/^(GDI|Nod)_/i, '').replace(/_\d+$/, '').replace(/_/g, ' ').toLowerCase();
+  (preset || 'soldier').replace(/^CnC_|^mp_/i, '').replace(/^(GDI|Nod)_/i, '').replace(/_\d*off$/i, '').replace(/_\d+$/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], (a[2] - b[2]) * 0.5);
 const enemyOf = (team) => (team === 'GDI' ? 'Nod' : 'GDI');
 const pct = (hp) => `${Math.round(hp * 100)}%`;
+
+// What a bot can buy now: its team's shop at today's prices (double without
+// power), what it can afford, and whether it's at its base (where the
+// purchase terminals are).
+const BUY_RANGE = 35; // m from one of our buildings
+function shopFor(world, me) {
+  const shop = world.shop?.[me.team];
+  if (!shop) return { items: [], atBase: false };
+  const own = world.buildings.filter((b) => b.team === me.team && b.hp > 0);
+  const factory = own.some((b) => /factory|weapons|airstrip|air/i.test(b.name));
+  const barracks = own.some((b) => /barracks|hand of nod|hon/i.test(b.name));
+  const price = (c) => (shop.powered ? c : c * 2);
+  const items = [
+    ...(barracks ? shop.characters.map((c) => ({ kind: 'character', index: c.index, name: c.name, cost: price(c.cost) })) : []),
+    ...(factory ? shop.vehicles.map((v) => ({ kind: 'vehicle', index: v.index, name: v.name, cost: price(v.cost) })) : []),
+  ];
+  const atBase = own.some((b) => dist(b.pos, me.pos) < BUY_RANGE);
+  return { items, affordable: items.filter((i) => i.cost <= me.credits), atBase, powered: shop.powered };
+}
+const itemId = (i) => `${i.kind === 'vehicle' ? 'veh' : 'char'}_${i.index}`;
 
 // Named places from the map's buildings: each building, each base, the middle.
 function placesOf(world) {
@@ -125,6 +145,12 @@ const PERSONAS = [
   { style: 'joker: fights fine, jokes and trash talks a little (never rude about real people)' },
 ];
 
+function shopLine(s) {
+  const shop = s.shop;
+  if (!shop?.items.length) return '';
+  return `You have ${s.me.credits} credits. Shop at your base${shop.powered ? '' : ' (no power: double prices)'}: ${shop.items.map((i) => `${i.name} ${i.cost}`).join(', ')}.${s.me.in_vehicle ? ` You are driving a ${s.me.in_vehicle}.` : ''}`;
+}
+
 function planPrompt(view, persona, notes, reason, options) {
   const s = view;
   const lines = [
@@ -132,6 +158,7 @@ function planPrompt(view, persona, notes, reason, options) {
     `You are ${s.me.place}, health ${pct(s.me.health)}, ${s.me.credits} credits, ${s.me.kills} kills, ${s.me.deaths} deaths.`,
     `Buildings: ${s.buildings.map((b) => `${b.side} ${b.name} ${b.health}`).join(', ')}.`,
     `Teammates: ${s.teammates.map((t) => `${t.name} ${t.place}${t.health < 0.5 ? ' (hurt)' : ''}`).join('; ') || 'none alive'}.`,
+    shopLine(s),
     `Enemies in sight: ${s.enemies_in_sight.map((e) => `${e.kind}${e.name ? ` ${e.name}` : ''} ${e.place} ${e.distance} m`).join('; ') || 'none'}.`,
     s.events.length ? `Recently: ${s.events.join('; ')}.` : '',
     notes.length ? `Your notes: ${notes.join('; ')}.` : '',
@@ -140,7 +167,7 @@ function planPrompt(view, persona, notes, reason, options) {
     '',
     'C&C is won by destroying enemy buildings: most of a team should be attacking or escorting attackers, a few defending when the base is threatened. Only mention buildings and places from the lists below; there is nothing else on the map you know of.',
     'Decide your next few plans. Your fast reflexes pick between them moment to moment, so give 2-4 different options, best first.',
-    `Each plan: {"id": short_snake_case, "text": what and why in a few words, "kind": "attack"|"defend"|"go"|"follow", "building": one of [${options.buildings.join(', ')}] for attack/defend, "place": one of [${options.places.join(', ')}] for go, "teammate": a teammate name for follow}.`,
+    `Each plan: {"id": short_snake_case, "text": what and why in a few words, "kind": "attack"|"defend"|"go"|"follow"|"buy", "building": one of [${options.buildings.join(', ')}] for attack/defend, "place": one of [${options.places.join(', ')}] for go, "teammate": a teammate name for follow, "item": a shop item's exact name for buy (you go back to base and buy it; a vehicle you then drive)}. Spend credits when it helps: better characters and vehicles win games.`,
     'Also: "orders": up to 3 short standing rules for yourself; "say": one line of team chat, or "" (usually ""; real players talk now and then, not every time: speak when someone asked you something, to propose or join a plan, or to warn; short and casual, no hashtags, never repeat what you or others just said); "note": something worth remembering this match (or "").',
     'Answer with JSON only: {"plans": [...], "orders": [...], "say": "...", "note": "..."}',
   ];
@@ -306,13 +333,14 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     if (alerts.length) bb.alerted = Date.now() + 5000;
     return {
       world,
-      me: { id: me.id, name: me.name, team: me.team, health: +me.hp.toFixed(2), credits: me.credits, character: characterName(me.char), place: placeOf(places, me.pos), pos: me.pos, kills: me.kills, deaths: me.deaths },
+      me: { id: me.id, name: me.name, team: me.team, health: +me.hp.toFixed(2), credits: me.credits, character: characterName(me.char), in_vehicle: me.vehicle ? characterName(world.vehicles.find((v) => v.id === me.vehicle)?.name) : null, place: placeOf(places, me.pos), pos: me.pos, kills: me.kills, deaths: me.deaths },
       enemies_in_sight: enemies,
       teammates: world.players.filter((p) => p.team === me.team && p.id !== me.id && p.alive).map((p) => ({ name: p.name, place: placeOf(places, p.pos), distance: Math.round(dist(me.pos, p.pos)), health: +p.hp.toFixed(2) })),
       buildings: world.buildings.filter((b) => b.team !== 'none').map((b) => ({ side: b.team === me.team ? 'ours' : 'theirs', name: buildingName(b), health: pct(b.hp) })),
       alerts,
       chat: chat.filter((c) => c.to === 'all' || c.to === me.team).slice(-6).map((c) => `${c.from}${c.to === 'all' ? '' : ' (team)'}: ${c.text}`),
       events: bb.events.slice(-5),
+      shop: (({ items, powered }) => ({ items: items.map(({ name, cost, kind }) => ({ name, cost, kind })), powered }))(shopFor(world, me)),
       blackboard: { personality: bb.persona.style, current: bb.current, planText: bb.planText, plans: bb.plans.map((p) => `${p.id}: ${p.text}`), orders: bb.orders },
       stuck: bot.stuck,
     };
@@ -331,7 +359,16 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     if (state.enemies_in_sight.length) callouts.enemies_spotted = 'Report the enemies you see.';
     if (state.enemies_in_sight.length && state.me.health < 0.6) callouts.need_help = 'Ask for help.';
     if (state.alerts.length) callouts.base_under_attack = 'Warn that our base is under attack.';
+    // At the base with credits: what to buy, if anything.
+    const shop = shopFor(world, state.me);
+    const buy = {};
+    if (shop.atBase && !state.me.in_vehicle && shop.affordable.length && Date.now() - (bb.lastBuy || 0) > 30000) {
+      buy.none = 'Buy nothing now: keep your credits.';
+      const vehicleWait = bb.wantVehicle || Date.now() - (bb.lastVehicleBuy || 0) < 120000;
+      for (const i of shop.affordable.filter((x) => x.kind !== 'vehicle' || !vehicleWait)) buy[itemId(i)] = i.kind === 'vehicle' ? `Buy a ${i.name} (${i.cost} credits) and drive it.` : `Become a ${i.name} (${i.cost} credits).`;
+    }
     const questions = {
+      ...(Object.keys(buy).length > 1 ? { buy: { type: 'choice', instructions: 'Do you buy something at the terminal now?', criteria: buy } } : {}),
       plan: { type: 'choice', instructions: 'Which of your plans fits the situation now?', criteria: plans },
       move: {
         type: 'choice',
@@ -401,6 +438,40 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     if (t.startsWith('enemy_')) cmd('fire', `target ${t.slice(6)}`);
     else if (t === 'building' && objective) cmd('fire', `shoot ${objective.pos[0].toFixed(1)} ${objective.pos[1].toFixed(1)} ${(objective.pos[2] + 2).toFixed(1)}`);
     else cmd('fire', 'hold_fire');
+    // Buying: the plan's item once at base (if affordable), else Clef's pick.
+    const shop = shopFor(world, me);
+    let pick = null;
+    if (shop.atBase && !me.vehicle && Date.now() - (bb.lastBuy || 0) > 30000) {
+      const wanted = plan?.item && shop.affordable.find((i) => i.name.toLowerCase() === plan.item.toLowerCase());
+      pick = wanted || shop.affordable.find((i) => itemId(i) === answers.buy?.choice) || null;
+      if (pick?.kind === 'vehicle' && (bb.wantVehicle || Date.now() - (bb.lastVehicleBuy || 0) < 120000)) pick = null;
+    }
+    if (pick) {
+      bb.lastBuy = Date.now();
+      send(`bot_do ${bot.id} buy ${pick.kind} ${pick.index}`);
+      bb.events.push(`you bought a ${pick.name}`);
+      if (pick.kind === 'vehicle') {
+        bb.wantVehicle = { at: Date.now(), name: pick.name };
+        bb.lastVehicleBuy = Date.now();
+      }
+      if (plan?.item) plan.item = null; // done
+    }
+    // A bought vehicle comes out of the factory: walk to it and get in.
+    if (bb.wantVehicle && (me.vehicle || Date.now() - bb.wantVehicle.at > 45000)) bb.wantVehicle = null;
+    if (bb.wantVehicle) {
+      // A new vehicle belongs to no team until someone gets in.
+      const empty = world.vehicles.filter((v) => (v.team === me.team || v.team === 'none') && !v.driver && dist(v.pos, me.pos) < 120 && !/ceiling|agt|obelisk|turret|harvester/i.test(v.name)).sort((a, b) => dist(a.pos, me.pos) - dist(b.pos, me.pos))[0];
+      if (empty) {
+        const d = dist(empty.pos, me.pos);
+        if (d < 7 && Date.now() - (bb.lastEnter || 0) > 1500) {
+          bb.lastEnter = Date.now();
+          send(`bot_do ${bot.id} enter ${empty.id}`);
+        } else if (d >= 7 && (!bb.goTo || dist(bb.goTo, empty.pos) > 3)) {
+          bb.goTo = empty.pos;
+          cmd('move', `go ${empty.pos.map((v) => v.toFixed(1)).join(' ')}`, true);
+        }
+      }
+    }
     // What to say.
     const c = answers.callout?.choice;
     const now = Date.now();
@@ -432,7 +503,11 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     }
     const plans = (Array.isArray(answer.plans) ? answer.plans : []).slice(0, 4).map((p, i) => {
       const plan = { id: String(p.id || `plan${i}`).replace(/[^\w]/g, '_').slice(0, 24) || `plan${i}`, text: cleanSay(p.text) || 'keep fighting' };
-      if (buildings[p.building] !== undefined) plan.building = buildings[p.building];
+      const item = p.kind === 'buy' && state.shop.items.find((x) => x.name.toLowerCase() === String(p.item || '').toLowerCase());
+      if (item) {
+        plan.item = item.name;
+        plan.place = `the ${state.me.team} base`;
+      } else if (buildings[p.building] !== undefined) plan.building = buildings[p.building];
       else if (placeNames.includes(p.place)) plan.place = p.place;
       else if (p.teammate && world.players.some((x) => x.name === p.teammate && x.team === state.me.team)) plan.teammate = p.teammate;
       else plan.place = 'the middle';

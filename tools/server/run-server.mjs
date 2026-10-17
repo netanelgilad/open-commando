@@ -43,7 +43,7 @@ const { values: opt } = parseArgs({
     // The rotation, comma-separated (the matchmaker's random order; loops).
     // Default: --map, then --next-map.
     maps: { type: 'string', default: process.env.REBEL_MAPS },
-    players: { type: 'string', default: '16' },
+    players: { type: 'string', default: '32' }, // C&C servers commonly ran 32 (16 a side)
     name: { type: 'string', default: 'Open Commando' },
     port: { type: 'string', default: '4848' },
     minutes: { type: 'string', default: '30' },
@@ -134,7 +134,7 @@ const t0 = Date.now();
 const stamp = () => ((Date.now() - t0) / 1000).toFixed(1);
 const recent = [];
 // What a lobby/matchmaker needs to know, from the server's own console output.
-const state = { ready: false, map: null, loaded: false, warmup: false, players: [] };
+const state = { ready: false, map: null, loaded: false, warmup: false, players: [], bots: 0 };
 let gameModule = null; // the game's Module once running
 let brain = null; // the bots' brain, if on (see below)
 const console_ = (line) => gameModule && gameModule.ccall('Rebel_Console_Command', null, ['string'], [line]);
@@ -154,6 +154,8 @@ const out = (t) => {
   if ((m = /^Warmup (on|off)/.exec(t))) state.warmup = m[1] === 'on';
   if ((m = /Player (\S+) joined the game/.exec(t)) && !state.players.includes(m[1])) state.players.push(m[1]);
   if ((m = /Player (\S+) left the game/.exec(t))) state.players = state.players.filter((p) => p !== m[1]);
+  if (/^\[BOT\] .* joined (GDI|Nod)$/.test(t)) state.bots++;
+  if (/^\[BOT\] .* left$/.test(t)) state.bots = Math.max(0, state.bots - 1);
 };
 if (opt['status-port']) {
   //   GET  /         {"ready", "map", "loaded", "warmup", "players", "perf", "ai", "log": [...]}

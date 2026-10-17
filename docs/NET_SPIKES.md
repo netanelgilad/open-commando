@@ -564,3 +564,27 @@ human (8), or a new one; servers stop 30 s after their last human leaves
 lobby (lobby.js, warmup, START_PLAYERS/MIN_PLAYERS/LOBBY_WAIT_S) is gone;
 `warmup` stays as a console command. Verified locally: one player straight
 into C&C_City with five bots; two players: four bots, 3 a side.
+
+## S18: bots buy, board and drive; 32 players; match history
+
+- Games take 32 players (16 a side) as Renegade servers commonly did; bots
+  top games up to 8 (BOT_FILL), humans take their places.
+- Bots buy: the state carries each team's shop (the purchase terminal's
+  characters and vehicles, prices, base power: double without it); `bot_do
+  <id> buy character|vehicle <n>` buys through VendorClass::Purchase_Item
+  (the game's own checks). The brain: the planner sees credits and the shop
+  and can plan "buy <item>" (back to base, buy it); at the base Clef gets a
+  "what do you buy" question over what is affordable now. A bought vehicle
+  comes out of the factory with the team's colors and no driver: the bot
+  walks to it and `bot_do <id> enter <vehicle>` puts it in
+  (VehicleGameObj::Add_Occupant, as the vehicle's door transition does: a
+  bot can't aim for the door zone, and the use key from 4-6 m off a
+  Mammoth's center doesn't board). Driving: orders go to the vehicle's own
+  action (the engine's vehicle AI steers), waypoints count as reached at
+  4 m; a vehicle stuck for a while is left on foot. Verified: rocket
+  soldiers, engineers, a buggy and a Mammoth Tank driven across Field.
+  Rough: vehicles follow the soldiers' walking grid, so they snag.
+- Match history: the matchmaker samples each match every 10 s (map,
+  humans, bots, fps, timer lateness, memory, AI spend), keeps the last 50
+  matches per region with how they ended and the server's last log lines:
+  `GET /history`, `GET /history/<match>`.
