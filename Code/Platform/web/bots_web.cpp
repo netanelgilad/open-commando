@@ -87,6 +87,12 @@ struct Bot {
   bool shootAt = false;  // ... or a point (a building)
   Vector3 shootPoint;
   bool dirty = false;    // a new order: act on it now
+  bool driving = false;  // in a vehicle (its grid, its orders)
+  // A short maneuver (bot_do maneuver): a point to get to first, by when,
+  // reversing (vehicles), then back on the path.
+  bool detour = false, detourBackup = false;
+  Vector3 detourPoint;
+  double detourUntil = 0, waitUntil = 0;
 };
 
 std::vector<Bot> Bots;
@@ -165,9 +171,15 @@ BuildingGameObj *Building_For(const Bot &b, const Vector3 &from, bool own) {
   return best;
 }
 
+// The grid for how the bot gets around right now: on foot or driving.
+NavGrid::Kind Grid_For(const Bot &b) {
+  SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
+  return s && s->Get_Vehicle() ? NavGrid::VEHICLE : NavGrid::SOLDIER;
+}
+
 void Plan(Bot &b, const Vector3 &me, const Vector3 &dest) {
   b.dest = dest;
-  NavGrid::Find_Path(me, dest, b.path);
+  NavGrid::Find_Path(Grid_For(b), me, dest, b.path);
   b.wp = 0;
   b.lastGoto = 0;
 }
@@ -215,6 +227,7 @@ void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
   if (move) {
     params.Set_Movement(*move, 1.0f, actor == s ? 1.0f : 3.0f);
     params.MovePathfind = false;
+    params.MoveBackup = b.detour && b.detourBackup; // vehicles: in reverse
   }
   PhysicalGameObj *target = b.targetId ? GameObjManager::Find_PhysicalGameObj(b.targetId) : nullptr;
   if (target && target->Get_Defense_Object()->Get_Health() <= 0)
@@ -233,6 +246,24 @@ void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
 // Walking, every 1/4 s: the next waypoint of the path, straight at it (the
 // engine's planner can't plan on these maps); replan when stuck.
 void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
+  if (now < b.waitUntil)
+    return; // holding still (maneuver "wait")
+  if (b.detour) {
+    Vector3 d = b.detourPoint - me;
+    d.Z = 0;
+    if (d.Length() > 2.5f && now < b.detourUntil) {
+      if (now - b.lastGoto > 500) {
+        Order(b, s, &b.detourPoint);
+        b.lastGoto = now;
+      }
+      return;
+    }
+    // Done (or given up): back on a path from here.
+    b.detour = false;
+    b.progressPos = me;
+    b.progressAt = now;
+    Plan(b, me, b.dest);
+  }
   size_t before = b.wp;
   const float reach = s->Get_Vehicle() ? 4.0f : 1.5f; // a vehicle can't stop on a spot
   while (b.wp < b.path.size()) {
@@ -258,7 +289,7 @@ void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
       Vector3 ahead = b.path[b.wp] - me;
       ahead.Z = 0;
       if (ahead.Length() > 0.1f)
-        NavGrid::Block(me + ahead * (1.0f / ahead.Length()), 1.0f);
+        NavGrid::Block(Grid_For(b), me + ahead * (1.0f / ahead.Length()), s->Get_Vehicle() ? 3.0f : 1.0f);
       if (s->Get_Vehicle() && b.stuckRow >= 4) {
         // A vehicle that can't get on (the walking grid is made for soldiers):
         // out, and on foot.
@@ -347,7 +378,7 @@ public:
           b.team == PLAYERTYPE_GDI ? "GDI" : "Nod", GOALS[b.goal], s ? "alive" : "dead", p.X, p.Y, p.Z, vel.Length(),
           (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck);
     }
-    Say("%d bots, walking grid %d nodes\n", (int)Bots.size(), NavGrid::Node_Count());
+    Say("%d bots, walking grids: soldiers %d nodes, vehicles %d\n", (int)Bots.size(), NavGrid::Node_Count(NavGrid::SOLDIER), NavGrid::Node_Count(NavGrid::VEHICLE));
   }
 };
 
@@ -367,10 +398,11 @@ public:
 class BotNavConsoleFunctionClass : public ConsoleFunctionClass {
 public:
   const char *Get_Name(void) override { return "bot_nav"; }
-  const char *Get_Help(void) override { return "BOT_NAV [file] - write the bots' walking grid as an image (PGM)."; }
+  const char *Get_Help(void) override { return "BOT_NAV [file|vehicles] - write a walking grid as an image (PGM)."; }
   void Activate(const char *input) override {
-    const char *file = input && *input ? input : "navgrid.pgm";
-    Say(NavGrid::Dump(file) ? "walking grid written to %s\n" : "no walking grid (%s)\n", file);
+    bool vehicles = input && strstr(input, "vehicle");
+    const char *file = vehicles ? "navgrid-vehicles.pgm" : input && *input ? input : "navgrid.pgm";
+    Say(NavGrid::Dump(vehicles ? NavGrid::VEHICLE : NavGrid::SOLDIER, file) ? "walking grid written to %s\n" : "no walking grid (%s)\n", file);
   }
 };
 
@@ -410,6 +442,7 @@ public:
 //   bot_do <id> shoot <x> <y> <z>   shoot at a point (a building)
 //   bot_do <id> buy character|vehicle <n>   (the team's shop, see "shop")
 //   bot_do <id> enter [vehicle]     get into the empty vehicle next to it (no id: the use key)
+//   bot_do <id> maneuver steer_left|steer_right|reverse_left|reverse_right|replan|wait|get_out
 //   bot_do <id> jump
 //   bot_do <id> say team|all <text>
 
@@ -462,6 +495,36 @@ bool Can_See(const Vector3 &eye, PhysicalGameObj *o) {
   test.CheckDynamicObjs = false;
   COMBAT_SCENE->Cast_Ray(test);
   return res.Fraction >= 1.0f;
+}
+
+// What's around a bot, by ray casts from about waist (bumper) height:
+// distances (m, up to 15) ahead, ahead-left/right (40 deg), left, right and
+// behind, relative to where it faces; other vehicles and soldiers count.
+void Feel(SoldierGameObj *s, float out[6]) {
+  PhysicalGameObj *body = s->Get_Vehicle() ? (PhysicalGameObj *)s->Get_Vehicle() : (PhysicalGameObj *)s;
+  Matrix3D tm = body->Get_Transform();
+  Vector3 at = tm.Get_Translation() + Vector3(0, 0, 1.0f);
+  Vector3 fwd = tm.Get_X_Vector();
+  fwd.Z = 0;
+  if (fwd.Length() < 0.01f)
+    fwd.Set(1, 0, 0);
+  fwd.Normalize();
+  Vector3 left(-fwd.Y, fwd.X, 0);
+  const float c = 0.766f, sn = 0.643f; // cos/sin 40 deg
+  Vector3 dirs[6] = {fwd, fwd * c + left * sn, fwd * c - left * sn, left, -left, -fwd};
+  body->Peek_Physical_Object()->Inc_Ignore_Counter();
+  if (body != s)
+    s->Peek_Physical_Object()->Inc_Ignore_Counter();
+  for (int i = 0; i < 6; i++) {
+    LineSegClass ray(at, at + dirs[i] * 15.0f);
+    CastResultStruct res;
+    PhysRayCollisionTestClass test(ray, &res, DEFAULT_COLLISION_GROUP, COLLISION_TYPE_PHYSICAL);
+    COMBAT_SCENE->Cast_Ray(test);
+    out[i] = 15.0f * res.Fraction;
+  }
+  body->Peek_Physical_Object()->Dec_Ignore_Counter();
+  if (body != s)
+    s->Peek_Physical_Object()->Dec_Ignore_Counter();
 }
 
 void Emit_State(double now) {
@@ -567,15 +630,26 @@ void Emit_State(double now) {
   first = true;
   for (Bot &b : Bots) {
     SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
-    snprintf(buf, sizeof(buf), "%s{\"id\":%d,\"waypoint\":%d,\"path\":%d,\"stuck\":%d,\"target\":%d,\"sees\":[",
+    snprintf(buf, sizeof(buf), "%s{\"id\":%d,\"waypoint\":%d,\"path\":%d,\"stuck\":%d,\"target\":%d,",
              first ? "" : ",", b.id, (int)b.wp, (int)b.path.size(), b.stuckRow, b.targetId);
     j += buf;
     first = false;
-    if (!s)
-      {
-        j += "]}";
-        continue;
-      }
+    if (!s) {
+      j += "\"sees\":[]}";
+      continue;
+    }
+    // Its surroundings (Feel) and how it's moving.
+    float f[6];
+    Feel(s, f);
+    Vector3 vel(0, 0, 0);
+    if (s->Get_Vehicle())
+      s->Get_Vehicle()->Get_Velocity(vel);
+    else
+      s->Get_Velocity(vel);
+    snprintf(buf, sizeof(buf), "\"feel\":[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f],\"speed\":%.1f,\"driving\":%s,\"maneuver\":%s,\"sees\":[",
+             f[0], f[1], f[2], f[3], f[4], f[5], vel.Length(), s->Get_Vehicle() ? "true" : "false",
+             b.detour || now < b.waitUntil ? "true" : "false");
+    j += buf;
     Vector3 eye;
     s->Get_Position(&eye);
     eye.Z += 1.6f;
@@ -683,6 +757,44 @@ public:
         v->Add_Occupant(s);
         Say("%s gets in a %s\n", b.name.c_str(), v->Get_Definition().Get_Name());
       } else if (!vid) {
+        s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
+      }
+    } else if (!strcmp(verb, "maneuver") && s) {
+      // A short move to get unstuck or around something, chosen by the brain
+      // from what the bot feels around it, then back on a path.
+      PhysicalGameObj *body = s->Get_Vehicle() ? (PhysicalGameObj *)s->Get_Vehicle() : (PhysicalGameObj *)s;
+      Matrix3D tm = body->Get_Transform();
+      Vector3 me = tm.Get_Translation(), fwd = tm.Get_X_Vector();
+      fwd.Z = 0;
+      if (fwd.Length() < 0.01f)
+        fwd.Set(1, 0, 0);
+      fwd.Normalize();
+      Vector3 left(-fwd.Y, fwd.X, 0);
+      bool vehicle = s->Get_Vehicle() != nullptr;
+      float far_ = vehicle ? 10.0f : 5.0f, side = vehicle ? 7.0f : 4.0f;
+      double now = emscripten_get_now();
+      auto detour = [&](const Vector3 &to, bool backup) {
+        b.detour = true;
+        b.detourBackup = backup && vehicle;
+        b.detourPoint = to;
+        b.detourUntil = now + 4000;
+        b.lastGoto = 0;
+      };
+      if (strstr(rest, "steer_left"))
+        detour(me + fwd * far_ + left * side, false);
+      else if (strstr(rest, "steer_right"))
+        detour(me + fwd * far_ - left * side, false);
+      else if (strstr(rest, "reverse_left"))
+        detour(me - fwd * (far_ * 0.6f) + left * (side * 0.5f), true);
+      else if (strstr(rest, "reverse_right"))
+        detour(me - fwd * (far_ * 0.6f) - left * (side * 0.5f), true);
+      else if (strstr(rest, "replan")) {
+        NavGrid::Block(Grid_For(b), me + fwd * (vehicle ? 4.0f : 1.5f), vehicle ? 3.0f : 1.0f);
+        Plan(b, me, b.dest);
+      } else if (strstr(rest, "wait")) {
+        b.waitUntil = now + 2000;
+        Order(b, s, &me);
+      } else if (strstr(rest, "get_out") && vehicle) {
         s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
       }
     } else if (!strcmp(verb, "jump")) {
@@ -794,6 +906,12 @@ void Rebel_Bots_Think(void) {
     }
     Vector3 me;
     s->Get_Position(&me);
+    if ((s->Get_Vehicle() != nullptr) != b.driving) { // in or out: the other grid
+      b.driving = s->Get_Vehicle() != nullptr;
+      b.detour = false;
+      if (b.wp < b.path.size())
+        Plan(b, me, b.dest);
+    }
     if (!Brain)
       Think_Bot(b, s, me, now);
     Step_Bot(b, s, me, now);

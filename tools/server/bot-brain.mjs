@@ -124,6 +124,10 @@ function scriptedDecide(state, questions) {
     } else if (id === 'callout') {
       const pick = baseAttacked && opts.includes('base_under_attack') ? 'base_under_attack' : me.health < 0.3 && seen.length ? 'need_help' : seen.length >= 2 ? 'enemies_spotted' : 'none';
       answers[id] = one(opts, opts.includes(pick) ? pick : 'none');
+    } else if (id === 'maneuver') {
+      const sur = state.surroundings;
+      const best = ['steer_left', 'steer_right'].filter((o) => opts.includes(o)).sort((a, b) => (b === 'steer_left' ? sur.clear_ahead_left_m : sur.clear_ahead_right_m) - (a === 'steer_left' ? sur.clear_ahead_left_m : sur.clear_ahead_right_m))[0];
+      answers[id] = one(opts, sur.times_stuck_in_a_row >= 3 ? 'replan' : best || (opts.includes('reverse_left') ? 'reverse_left' : 'replan'));
     } else if (q.type === 'noul') {
       answers[id] = { probability: 0 };
     }
@@ -383,6 +387,14 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       world,
       me: { id: me.id, name: me.name, team: me.team, health: +me.hp.toFixed(2), credits: me.credits, character: characterName(me.char), in_vehicle: me.vehicle ? characterName(world.vehicles.find((v) => v.id === me.vehicle)?.name) : null, place: placeOf(places, me.pos), pos: me.pos, kills: me.kills, deaths: me.deaths },
       enemies_in_sight: enemies,
+      surroundings: bot.feel && {
+        driving: bot.driving,
+        speed: bot.speed,
+        clear_ahead_m: bot.feel[0], clear_ahead_left_m: bot.feel[1], clear_ahead_right_m: bot.feel[2],
+        clear_left_m: bot.feel[3], clear_right_m: bot.feel[4], clear_behind_m: bot.feel[5],
+        times_stuck_in_a_row: bot.stuck,
+        in_maneuver: bot.maneuver,
+      },
       teammates: world.players.filter((p) => p.team === me.team && p.id !== me.id && p.alive).map((p) => ({ name: p.name, place: placeOf(places, p.pos), distance: Math.round(dist(me.pos, p.pos)), health: +p.hp.toFixed(2) })),
       buildings: world.buildings.filter((b) => b.team !== 'none').map((b) => ({ side: b.team === me.team ? 'ours' : 'theirs', name: buildingName(b), health: pct(b.hp) })),
       alerts,
@@ -415,7 +427,26 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       const vehicleWait = bb.wantVehicle || Date.now() - (bb.lastVehicleBuy || 0) < 120000;
       for (const i of shop.affordable.filter((x) => x.kind !== 'vehicle' || !vehicleWait)) buy[itemId(i)] = i.kind === 'vehicle' ? `Buy a ${i.name} (${i.cost} credits) and drive it.` : `Become a ${i.name} (${i.cost} credits).`;
     }
+    // Blocked or crawling into something: how to get going again (a driver's
+    // or a soldier's quick read of what's around, not a reflex).
+    const sur = state.surroundings;
+    const maneuver = {};
+    const walking = bb.walkingTo; // still has a way to go
+    if (sur && !sur.in_maneuver && walking && (sur.times_stuck_in_a_row >= 1 || (sur.speed < 1.2 && sur.clear_ahead_m < (sur.driving ? 5 : 1.2)))) {
+      const open = (m) => m >= (sur.driving ? 8 : 3);
+      maneuver.keep_going = `Nothing to fix: keep following your route (clear ahead ${sur.clear_ahead_m} m).`;
+      if (open(sur.clear_ahead_left_m)) maneuver.steer_left = `Go around it on the left (open ${sur.clear_ahead_left_m} m ahead-left).`;
+      if (open(sur.clear_ahead_right_m)) maneuver.steer_right = `Go around it on the right (open ${sur.clear_ahead_right_m} m ahead-right).`;
+      if (sur.clear_behind_m >= (sur.driving ? 6 : 2)) {
+        maneuver.reverse_left = `Back up to the left and try again (${sur.clear_behind_m} m clear behind).`;
+        maneuver.reverse_right = `Back up to the right and try again (${sur.clear_behind_m} m clear behind).`;
+      }
+      maneuver.replan = 'This way is blocked: take another route.';
+      maneuver.wait = 'Something is moving past: wait two seconds.';
+      if (sur.driving && sur.times_stuck_in_a_row >= 2) maneuver.get_out = 'The vehicle is stuck for good: get out and go on foot.';
+    }
     const questions = {
+      ...(Object.keys(maneuver).length > 2 ? { maneuver: { type: 'choice', instructions: `You are ${sur?.driving ? 'driving' : 'on foot'} at ${sur?.speed} m/s and something is in the way. What do you do?`, criteria: maneuver } } : {}),
       ...(Object.keys(buy).length > 1 ? { buy: { type: 'choice', instructions: 'Do you buy something at the terminal now?', criteria: buy } } : {}),
       plan: { type: 'choice', instructions: 'Which of your plans fits the situation now?', criteria: plans },
       move: {
@@ -472,6 +503,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       const mate = world.players.filter((p) => p.team === me.team && p.id !== me.id && p.alive).sort((a, b) => dist(me.pos, a.pos) - dist(me.pos, b.pos))[0];
       to = mate?.pos;
     }
+    bb.walkingTo = move !== 'hold' && to && bot.waypoint < bot.path;
     if (move === 'hold' || !to) cmd('move', 'stop');
     else {
       // Re-send only for a new destination (5 m), or when the walk ended.
@@ -486,6 +518,13 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     if (t.startsWith('enemy_')) cmd('fire', `target ${t.slice(6)}`);
     else if (t === 'building' && objective) cmd('fire', `shoot ${objective.pos[0].toFixed(1)} ${objective.pos[1].toFixed(1)} ${(objective.pos[2] + 2).toFixed(1)}`);
     else cmd('fire', 'hold_fire');
+    // Getting around something (the maneuver question).
+    const mv = answers.maneuver?.choice;
+    if (mv && mv !== 'keep_going' && Date.now() - (bb.lastManeuver || 0) > 2500) {
+      bb.lastManeuver = Date.now();
+      send(`bot_do ${bot.id} maneuver ${mv}`);
+      if (mv !== 'wait') bb.goTo = null; // the route changes: re-send the destination after
+    }
     // Buying: the plan's item once at base (if affordable), else Clef's pick.
     const shop = shopFor(world, me);
     let pick = null;
