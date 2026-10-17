@@ -13,6 +13,8 @@
 //                                  server: {model, input} with the match's key (aiKey)
 //   GET  /match/<id>               a match server's status
 //   GET  /history[/<id>]           recent matches; one match's samples (matchmaker-do.js)
+//   POST /record/<id>?seq=<n>      a batch of the match's record (its server, match key)
+//   GET  /record/<id>              the whole record, JSON lines (START_TOKEN)
 //
 // Regions are Cloudflare's container placement regions. A match id carries
 // its region ("m-weur-1a2b3c4d"); the region's matchmaker, the match's room
@@ -81,13 +83,10 @@ async function chooseRegion(env, url) {
   const near = ranked.filter((r) => pings[r] <= best + 60 && pings[r] <= Math.max(150, best));
   if (near.length < 2) return ranked[0];
   const busy = await Promise.all(near.map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).then((s) => s.queue.length + s.matches.reduce((n, m) => n + m.players.length + (m.joining || 0), 0)).catch(() => 0)));
-  // Most players wins; a tie goes to the earlier region in REGIONS (so
-  // players queueing at the same moment agree).
-  const order = Object.keys(REGIONS);
+  // Most players wins; a tie (e.g. nobody playing anywhere) goes to the
+  // player's fastest region (near is sorted by ping).
   let pick = 0;
-  for (let i = 1; i < near.length; i++) {
-    if (busy[i] > busy[pick] || (busy[i] === busy[pick] && order.indexOf(near[i]) < order.indexOf(near[pick]))) pick = i;
-  }
+  for (let i = 1; i < near.length; i++) if (busy[i] > busy[pick]) pick = i;
   return near[pick];
 }
 
@@ -152,6 +151,30 @@ export default {
       // Every region's last matches, newest first.
       const all = await Promise.all(Object.keys(REGIONS).map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/history?region=${r}`)).then((res) => res.json()).catch(() => [])));
       return json(all.flat().sort((a, b) => b.startedAt - a.startedAt));
+    }
+    // A match's record: its server sends batches (POST, the match's key);
+    // reading one back takes START_TOKEN (names and chat are in it).
+    const record = /^\/record\/([\w-]{1,64})$/.exec(url.pathname);
+    if (record) {
+      const id = record[1];
+      if (request.method === 'POST') {
+        if (!env.START_TOKEN || request.headers.get('Authorization') !== `Bearer ${await aiKey(env.START_TOKEN, id)}`) return new Response('forbidden', { status: 403 });
+        const seq = String(+url.searchParams.get('seq') || 0).padStart(5, '0');
+        await env.GAMES.put(`matches/${id}/${seq}.jsonl.gz`, request.body, { httpMetadata: { contentType: 'application/gzip' } });
+        return new Response(null, { status: 204 });
+      }
+      if (!env.START_TOKEN || request.headers.get('Authorization') !== `Bearer ${env.START_TOKEN}`) return new Response('forbidden', { status: 403 });
+      const list = await env.GAMES.list({ prefix: `matches/${id}/` });
+      const parts = list.objects.filter((o) => o.key.endsWith('.jsonl.gz')).sort((a, b) => a.key.localeCompare(b.key));
+      const { readable, writable } = new TransformStream();
+      (async () => {
+        for (const o of parts) {
+          const obj = await env.GAMES.get(o.key);
+          if (obj) await obj.body.pipeThrough(new DecompressionStream('gzip')).pipeTo(writable, { preventClose: true });
+        }
+        await writable.close();
+      })();
+      return new Response(readable, { headers: { 'content-type': 'application/x-ndjson' } });
     }
     const hist = /^\/history\/([\w-]{1,64})$/.exec(url.pathname);
     if (hist) return matchmaker(env, regionOf(hist[1])).fetch(new Request(`${url.origin}/history/${hist[1]}?region=${regionOf(hist[1])}`)).then(async (res) => (res.ok ? json(await res.json()) : res));

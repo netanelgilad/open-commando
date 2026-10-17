@@ -137,12 +137,14 @@ export class Matchmaker extends DurableObject {
   startServer(match, now) {
     match.lastStartAt = now;
     const start = async () => {
-      const envVars = { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAPS: match.maps.join(',') };
+      const https = this.env.PUBLIC_WSS.replace(/^wss:/, 'https:');
+      const key = await aiKey(this.env.START_TOKEN, match.id); // this match's key (ai.js)
+      const envVars = { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAPS: match.maps.join(','), REBEL_RECORD_URL: `${https}/record/${match.id}`, REBEL_MATCH_KEY: key };
       if (this.env.BOT_BRAIN && this.env.BOT_BRAIN !== 'off') {
         // The bots' brain calls the models through /ai/<match> (ai.js).
         envVars.REBEL_BOT_BRAIN = this.env.BOT_BRAIN;
-        envVars.REBEL_AI_URL = `${this.env.PUBLIC_WSS.replace(/^wss:/, 'https:')}/ai/${match.id}`;
-        envVars.REBEL_AI_KEY = await aiKey(this.env.START_TOKEN, match.id);
+        envVars.REBEL_AI_URL = `${https}/ai/${match.id}`;
+        envVars.REBEL_AI_KEY = key;
       }
       await this.server(match.id).start({ envVars });
     };
@@ -208,6 +210,7 @@ export class Matchmaker extends DurableObject {
     const rec = this.record(m);
     const save = async () => {
       await this.ctx.storage.put(`match:${m.id}`, rec);
+      await this.env.GAMES?.put(`matches/${m.id}/summary.json`, JSON.stringify(rec)); // next to its record
       const { samples, lastLog, ...summary } = rec;
       const history = [summary, ...((await this.ctx.storage.get('history')) || []).filter((x) => x.id !== m.id)];
       for (const old of history.splice(HISTORY_MATCHES)) await this.ctx.storage.delete(`match:${old.id}`);

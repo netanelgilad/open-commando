@@ -13,7 +13,6 @@
 //
 // The planner and decider share a blackboard per bot; the decider reads it as
 // part of its state, and can wake the planner (rethink).
-import { appendFileSync } from 'node:fs';
 
 const DECIDE_MS = [300, 500]; // per bot, jittered, while fighting or under attack
 const IDLE_DECIDE_MS = [900, 1300]; // otherwise
@@ -184,7 +183,7 @@ export const PLANNERS = [
 ];
 const SKIP_FAILED_MS = 60000;
 
-export function llmPlanner(ai, stats) {
+export function llmPlanner(ai, stats, rec = () => {}) {
   const skipUntil = {};
   return async (view, persona, notes, reason, options) => {
     const prompt = planPrompt(view, persona, notes, reason, options);
@@ -202,6 +201,7 @@ export function llmPlanner(ai, stats) {
         const text = body.output?.choices?.[0]?.message?.content;
         if (!res.ok || !text) throw new Error(body.error || `HTTP ${res.status}, no content`);
         const answer = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+        rec('planner_call', { bot: view.me.name, model: p.model, ms: Date.now() - t0, usage: body.output.usage, reason, prompt, reply: text });
         stats.calls++;
         stats.ms.push(Date.now() - t0);
         stats.tokens += body.output.usage?.total_tokens || 0;
@@ -210,6 +210,7 @@ export function llmPlanner(ai, stats) {
       } catch (e) {
         stats.failed++;
         stats.lastError = `${p.model}: ${String(e.message || e).slice(0, 120)}`;
+        rec('planner_error', { bot: view.me.name, model: p.model, ms: Date.now() - t0, error: String(e.message || e).slice(0, 300) });
         (stats.errors ??= {})[p.model] = stats.lastError;
         skipUntil[p.model] = Date.now() + SKIP_FAILED_MS;
       }
@@ -265,17 +266,22 @@ const CALLOUTS = {
 const CLEF_USD_PER_M = 0.038;
 const PLANNER_USD_PER_M = 0.7;
 
-export function createBrain({ mode = 'scripted', send, log, out = console.log, ai = null, budgetUsd = 2 }) {
+export function createBrain({ mode = 'scripted', send: sendCommand, record: rec = () => {}, out = console.log, ai = null, budgetUsd = 2 }) {
+  // Every command the bots get goes into the record too.
+  const send = (line) => {
+    rec('command', { line });
+    sendCommand(line);
+  };
   let world = null;
   let places = [];
   let pending = false;
   const chat = []; // {t, from, team, text, to: 'all'|team}
   const bots = new Map(); // id -> blackboard and memory
-  const record = (entry) => log && appendFileSync(log, JSON.stringify(entry) + '\n');
+
   const stats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null };
   const model = (mode === 'clef' || mode === 'hybrid') && ai?.url ? clefDecider(ai, stats) : null;
   const planStats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null, by: {} };
-  const planner = mode === 'hybrid' && ai?.url ? llmPlanner(ai, planStats) : null;
+  const planner = mode === 'hybrid' && ai?.url ? llmPlanner(ai, planStats, rec) : null;
   const lastBotChat = {}; // per team: bots' lines at least 6 s apart
   // The match's model budget: past it, the bots play on scripted.
   const spent = () => (stats.tokens * CLEF_USD_PER_M + planStats.tokens * PLANNER_USD_PER_M) / 1e6;
@@ -303,6 +309,48 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
         planStats.lastError = null;
       }
     }, 30000).unref();
+  }
+
+  // What happened between two world states: deaths and kills, buildings
+  // damaged or destroyed, vehicles made or lost; and a snapshot every 5 s.
+  let lastSnapshot = 0;
+  const damage = {}; // building id -> damage since the last report
+  function gameEvents(a, b) {
+    const now = Date.now();
+    if (now - lastSnapshot >= 5000) {
+      lastSnapshot = now;
+      rec('snapshot', {
+        map: b.map,
+        buildings: b.buildings.map((x) => ({ id: x.id, name: x.name, team: x.team, hp: x.hp })),
+        players: b.players.map((p) => ({ id: p.id, name: p.name, team: p.team, bot: p.bot, alive: p.alive, hp: p.hp, credits: p.credits, kills: p.kills, deaths: p.deaths, char: p.char, vehicle: p.vehicle, pos: p.pos })),
+        vehicles: b.vehicles.filter((v) => !/ceiling|agt|obelisk|turret/i.test(v.name)).map((v) => ({ id: v.id, name: v.name, team: v.team, hp: v.hp, driver: v.driver, pos: v.pos })),
+        bots: b.bots.map((x) => ({ id: x.id, waypoint: x.waypoint, path: x.path, stuck: x.stuck, target: x.target, sees: x.sees, dest: x.dest })),
+      });
+    }
+    if (!a || a.map !== b.map) return;
+    const old = new Map(a.players.map((p) => [p.id, p]));
+    for (const p of b.players) {
+      const o = old.get(p.id);
+      if (!o) continue;
+      if (p.deaths > o.deaths) rec('death', { name: p.name, team: p.team, bot: p.bot, char: o.char, pos: o.pos, place: placeOf(places, o.pos) });
+      if (p.kills > o.kills) rec('kill', { name: p.name, team: p.team, bot: p.bot, char: p.char, pos: p.pos, place: placeOf(places, p.pos) });
+      if (p.char !== o.char && p.alive && o.alive) rec('character', { name: p.name, bot: p.bot, from: o.char, to: p.char });
+      if (p.vehicle !== o.vehicle) rec(p.vehicle ? 'vehicle_enter' : 'vehicle_exit', { name: p.name, bot: p.bot, vehicle: (b.vehicles.find((v) => v.id === (p.vehicle || o.vehicle)) || a.vehicles.find((v) => v.id === o.vehicle))?.name });
+    }
+    const oldB = new Map(a.buildings.map((x) => [x.id, x]));
+    for (const x of b.buildings) {
+      const o = oldB.get(x.id);
+      if (!o) continue;
+      if (o.hp > 0 && x.hp <= 0) rec('building_destroyed', { name: x.name, team: x.team });
+      else if (x.hp < o.hp) damage[x.id] = (damage[x.id] || 0) + (o.hp - x.hp);
+      if ((damage[x.id] || 0) >= 0.05) {
+        rec('building_damaged', { name: x.name, team: x.team, hp: x.hp, lost: +damage[x.id].toFixed(3) });
+        damage[x.id] = 0;
+      }
+    }
+    const oldV = new Set(a.vehicles.map((v) => v.id)), newV = new Set(b.vehicles.map((v) => v.id));
+    for (const v of b.vehicles) if (!oldV.has(v.id)) rec('vehicle_new', { id: v.id, name: v.name, team: v.team, pos: v.pos });
+    for (const v of a.vehicles) if (!newV.has(v.id) && !/ceiling|agt|obelisk|turret/i.test(v.name)) rec('vehicle_lost', { id: v.id, name: v.name, team: v.team, pos: v.pos });
   }
 
   function blackboard(id) {
@@ -488,7 +536,7 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     bb.plans = p.plans;
     bb.orders = p.orders || [];
     state.blackboard.plans = bb.plans.map((x) => `${x.id}: ${x.text}`);
-    record({ t: now, bot: state.me.name, by, planner: p });
+    rec('plans', { bot: state.me.name, team: state.me.team, by, plans: p.plans, orders: p.orders });
   }
 
   // The model's plans, checked against the map: buildings and places it may
@@ -579,7 +627,7 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
       bb.why = 'your reflexes say something happened that your plans do not cover';
     }
     act(bot, me, state, bb, answers, objectiveOf(bb.plans.find((p) => p.id === answers.plan?.choice) || plan, me));
-    record({ t: now, bot: me.name, by, ms, state: modelState, questions: Object.fromEntries(Object.entries(questions).map(([k, q]) => [k, Object.keys(q.criteria || { yes: 1 })])), answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.probabilities ?? a.probability])) });
+    rec('decision', { bot: me.name, team: me.team, by, ms, state: modelState, questions, answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.probabilities ?? a.probability])) });
   }
 
   function tick() {
@@ -605,13 +653,15 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     for (const id of bots.keys()) if (!players.has(id)) bots.delete(id);
   }
 
-  out(`[brain] ${mode} brain for the bots${log ? `, decisions logged to ${log}` : ''}`);
+  out(`[brain] ${mode} brain for the bots`);
   return {
     // The models' spend so far (the page shows it during a match).
     usage: () => ({ usd: +spent().toFixed(4), budgetUsd, decisions: stats.calls, plans: planStats.calls, planners: planStats.by }),
     onState(json) {
       const map = world?.map;
+      const before = world;
       world = JSON.parse(json);
+      gameEvents(before, world);
       if (map && world.map !== map) chat.length = 0; // a new map: the lobby's talk is over
       if (!pending) {
         pending = true;
@@ -622,6 +672,7 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
       const from = world?.players.find((p) => p.id === sender);
       chat.push({ t: Date.now(), from: from ? from.name : 'Host', to: type === 1 && from ? from.team : 'all', text });
       out(`[chat] ${chat.at(-1).from}${type === 1 ? ' (team)' : ''}: ${text}`);
+      rec('chat', { from: chat.at(-1).from, bot: !!from?.bot, to: chat.at(-1).to, text });
       if (chat.length > 50) chat.shift();
       // Named in chat: that bot thinks (and may answer). Otherwise a team line
       // gets one teammate's attention now and then (humans' lines always).

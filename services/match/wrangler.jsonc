@@ -75,6 +75,9 @@
     "BOT_BRAIN": "hybrid"
   },
   "ai": { "binding": "AI" },
+  // Every match's record (tools/server/recorder.mjs): matches/<id>/<seq>.jsonl.gz
+  // and matches/<id>/summary.json. PRIVATE: players' names and chat.
+  "r2_buckets": [{ "binding": "GAMES", "bucket_name": "open-commando-games" }],
   "observability": { "enabled": true },
   "workers_dev": true
 }

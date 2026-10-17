@@ -7,7 +7,7 @@
 //   node tools/server/run-server.mjs --net ws://127.0.0.1:8787/room/<name> \
 //     [--game <install dir>] [--bin build/wasm-release/bin] [--map C&C_Field.mix]
 //     [--players 16] [--name "Open Commando"] [--work /tmp/rebel-server]
-//     [--bot-brain scripted] [--bot-log bots.jsonl]
+//     [--bot-brain scripted|clef|hybrid] [--record-dir <dir>]
 //
 // Type console commands on stdin (game_info, player_info, amsg <text>, kick
 // <name>, quit...), as at the original server's console.
@@ -34,7 +34,9 @@ const { values: opt } = parseArgs({
     // clef (decisions by Clef-flash via REBEL_AI_URL with REBEL_AI_KEY), or hybrid
     // (Clef-flash decides, DeepSeek V4 Flash plans and talks).
     'bot-brain': { type: 'string', default: process.env.REBEL_BOT_BRAIN || 'off' },
-    'bot-log': { type: 'string', default: process.env.REBEL_BOT_LOG }, // every decision, as JSON lines
+    // The game's record (recorder.mjs): to the match service (REBEL_RECORD_URL
+    // with REBEL_MATCH_KEY), or to <dir>/record.jsonl.
+    'record-dir': { type: 'string', default: process.env.REBEL_RECORD_DIR },
     game: { type: 'string', default: process.env.REBEL_GAME_DIR || resolve(engine, '../game-data/renegade') },
     bin: { type: 'string', default: join(engine, 'build/wasm-release/bin') },
     work: { type: 'string', default: '/tmp/rebel-server' },
@@ -137,11 +139,13 @@ const recent = [];
 const state = { ready: false, map: null, loaded: false, warmup: false, players: [], bots: 0 };
 let gameModule = null; // the game's Module once running
 let brain = null; // the bots' brain, if on (see below)
+let recorder = { add() {}, flush: async () => {} }; // the game's record, see below
 const console_ = (line) => gameModule && gameModule.ccall('Rebel_Console_Command', null, ['string'], [line]);
 const out = (t) => {
   const line = `${stamp()} ${t}`;
   console.log(line);
   if (/\[net\] rtt|Load \d+% complete/.test(t)) return;
+  if (!/^\[(perf|chat|record)\]/.test(t)) recorder.add('log', { line: t });
   recent.push(line);
   if (recent.length > 200) recent.shift();
   let m;
@@ -178,11 +182,16 @@ if (opt['status-port']) {
 net.log = (t) => out(`[net] ${t}`);
 await net.ready;
 
+{
+  const { createRecorder } = await import('./recorder.mjs');
+  recorder = createRecorder({ url: process.env.REBEL_RECORD_URL, key: process.env.REBEL_MATCH_KEY || process.env.REBEL_AI_KEY, dir: opt['record-dir'], out });
+  recorder.add('server', { maps: rotation, players: +opt.players, brain: opt['bot-brain'], net: opt.net });
+}
 if (opt['bot-brain'] !== 'off') {
   const { createBrain } = await import('./bot-brain.mjs');
   const ai = process.env.REBEL_AI_URL && { url: process.env.REBEL_AI_URL, key: process.env.REBEL_AI_KEY };
   const budgetUsd = +(process.env.REBEL_AI_BUDGET_USD || 2); // per server (one match)
-  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out, ai, budgetUsd });
+  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), record: recorder.add, out, ai, budgetUsd });
 }
 
 globalThis.rebelNodeModule = {
@@ -206,7 +215,12 @@ globalThis.rebelNodeModule = {
 require(join(opt.bin, 'renegade.js'));
 // As a container's first process (PID 1) nothing ends us on SIGTERM unless
 // we do: the container platform stops idle servers that way.
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { console.log(`${stamp()} ${sig}: exiting`); process.exit(0); });
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => {
+  console.log(`${stamp()} ${sig}: exiting`);
+  recorder.add('stop', { signal: sig });
+  // The record's last batch, then out (a few seconds at most).
+  Promise.race([recorder.flush(), new Promise((r) => setTimeout(r, 4000))]).finally(() => process.exit(0));
+});
 // Round trips through the hub (and this event loop, which the game shares)
 // and traffic, every 10 s.
 setInterval(() => net.probe(), 200).unref();
@@ -227,7 +241,11 @@ setInterval(() => {
   const frames = gameModule?._Rebel_Frame_Count ? gameModule._Rebel_Frame_Count() : 0;
   const now = Date.now();
   perf.fps = Math.round(((frames - perf.frames) * 1000) / (now - perf.at));
-  state.perf = { fps: perf.fps, lagMaxMs: perf.lagMax, rssMb: Math.round(m.rss / 2 ** 20) };
-  out(`[perf] ${perf.fps} fps, timers up to ${perf.lagMax} ms late; rss ${Math.round(m.rss / 2 ** 20)} MB, wasm ${Math.round((gameModule?.HEAPU16?.buffer.byteLength || 0) / 2 ** 20)} MB, js heap ${Math.round(m.heapUsed / 2 ** 20)} MB`);
+  const cpu = process.cpuUsage();
+  const cpuPct = perf.cpu ? Math.round(((cpu.user - perf.cpu.user + cpu.system - perf.cpu.system) / 1000 / (now - perf.at)) * 100) : null;
+  perf.cpu = cpu;
+  state.perf = { fps: perf.fps, lagMaxMs: perf.lagMax, rssMb: Math.round(m.rss / 2 ** 20), cpuPct };
+  recorder.add('perf', { ...state.perf, wasmMb: Math.round((gameModule?.HEAPU16?.buffer.byteLength || 0) / 2 ** 20), heapMb: Math.round(m.heapUsed / 2 ** 20), players: state.players.length, bots: state.bots, map: state.map, ai: brain?.usage?.() ?? null, net: net.stats });
+  out(`[perf] ${perf.fps} fps, cpu ${cpuPct ?? '-'}%, timers up to ${perf.lagMax} ms late; rss ${Math.round(m.rss / 2 ** 20)} MB, wasm ${Math.round((gameModule?.HEAPU16?.buffer.byteLength || 0) / 2 ** 20)} MB, js heap ${Math.round(m.heapUsed / 2 ** 20)} MB`);
   Object.assign(perf, { frames, at: now, lagMax: 0 });
 }, 10000).unref();
