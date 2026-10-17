@@ -111,8 +111,11 @@ export class Room extends DurableObject {
     if (a && this.byAddress.get(a.ip) === ws) this.byAddress.delete(a.ip);
   }
 
-  webSocketClose(ws) {
+  webSocketClose(ws, code) {
     this.drop(ws);
+    // Complete the close handshake (hibernating sockets don't on their own;
+    // the other side would wait for it).
+    try { ws.close(code === 1005 || code === 1006 ? 1000 : code, 'closed'); } catch {}
   }
 
   webSocketError(ws) {
