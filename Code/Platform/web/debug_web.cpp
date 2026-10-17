@@ -95,7 +95,12 @@ static void Load_Test_Game(void);
 #include "showroom_web.h"
 #include "bots_web.h"
 
+// Frames run so far (the page and run-server.mjs turn it into frames a second).
+static unsigned FrameCount = 0;
+extern "C" unsigned Rebel_Frame_Count(void) { return FrameCount; }
+
 extern "C" void Rebel_Run_Pending_Actions(void) {
+  FrameCount++;
   Rebel_Showroom_Run_Pending();
   Rebel_Bots_Think();
   if (!PendingConsole.empty()) {
@@ -355,4 +360,16 @@ static void Vehicle_Action(int action) {
     v->Add_Occupant(star);
     fprintf(stderr, "[debug] entered vehicle %d (driver %p)\n", SpawnedVehicleId, (void *)v->Get_Driver());
   }
+}
+
+// The local player's ping as the server measures it (ms; -1 when not in a
+// network game). Read by the page's network overlay (web/rebel.js).
+#include "playermanager.h"
+#include "player.h"
+#include "cnetwork.h"
+extern "C" int Rebel_My_Ping(void) {
+  if (!cNetwork::I_Am_Client())
+    return -1;
+  cPlayer *me = cPlayerManager::Find_Player(cNetwork::Get_My_Id());
+  return me ? me->Get_Ping() : -1;
 }

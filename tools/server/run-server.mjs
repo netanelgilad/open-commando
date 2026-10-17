@@ -209,8 +209,23 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { console.log(`${
 // and traffic, every 10 s.
 setInterval(() => net.probe(), 200).unref();
 setInterval(() => out(`[net] rtt ${JSON.stringify(net.probeStats())} ${JSON.stringify(net.stats)}`), 10000).unref();
-// Memory, every 10 s (containers have a fixed allowance; wasm memory only grows).
+// Performance, every 10 s: the game's frames a second (a slow server is laggy
+// for everyone, whatever their ping), how late this event loop's timers ran
+// (the game, the network and the bots' brain all share it), and memory
+// (containers have a fixed allowance; wasm memory only grows).
+const perf = { frames: 0, at: Date.now(), lagMax: 0, fps: 0 };
+let tickAt = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  perf.lagMax = Math.max(perf.lagMax, now - tickAt - 50);
+  tickAt = now;
+}, 50).unref();
 setInterval(() => {
   const m = process.memoryUsage();
-  out(`[mem] rss ${Math.round(m.rss / 2 ** 20)} MB, wasm ${Math.round((gameModule?.HEAPU16?.buffer.byteLength || 0) / 2 ** 20)} MB, js heap ${Math.round(m.heapUsed / 2 ** 20)} MB`);
+  const frames = gameModule?._Rebel_Frame_Count ? gameModule._Rebel_Frame_Count() : 0;
+  const now = Date.now();
+  perf.fps = Math.round(((frames - perf.frames) * 1000) / (now - perf.at));
+  state.perf = { fps: perf.fps, lagMaxMs: perf.lagMax, rssMb: Math.round(m.rss / 2 ** 20) };
+  out(`[perf] ${perf.fps} fps, timers up to ${perf.lagMax} ms late; rss ${Math.round(m.rss / 2 ** 20)} MB, wasm ${Math.round((gameModule?.HEAPU16?.buffer.byteLength || 0) / 2 ** 20)} MB, js heap ${Math.round(m.heapUsed / 2 ** 20)} MB`);
+  Object.assign(perf, { frames, at: now, lagMax: 0 });
 }, 10000).unref();

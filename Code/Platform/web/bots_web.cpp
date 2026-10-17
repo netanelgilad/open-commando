@@ -684,13 +684,17 @@ void Rebel_Bots_Think(void) {
   double now = emscripten_get_now();
   if (Fill > 0)
     Fill_Bots(now);
+  // The walking grid builds as soon as a map with bot_fill on is loaded, a
+  // small slice a frame, so it's ready before the first human (and bots)
+  // arrive instead of slowing the server down when they do.
+  if (Fill > 0 || !Bots.empty())
+    NavGrid::Ensure();
   if (Bots.empty())
     return;
   if (Brain && now >= NextState && !CombatManager::Is_Loading_Level()) {
     NextState = now + 250;
     Emit_State(now);
   }
-  NavGrid::Ensure(); // builds over a few seconds after a map loads
   // Forget bots whose player is gone (a map change resets players).
   for (int i = (int)Bots.size() - 1; i >= 0; i--)
     if (!cPlayerManager::Find_Player(Bots[i].id))

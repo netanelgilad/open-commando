@@ -292,7 +292,7 @@ bool Ensure(void) {
     Start_Build();
   }
   if (Building != PHASE_READY)
-    Build_Step(10.0);
+    Build_Step(3.0); // ms a frame: the server keeps its frame rate on a small CPU
   return Building == PHASE_READY && !Nodes.empty();
 }
 

@@ -43,9 +43,22 @@ function rebelFrameTick() {
   fpsLast = now;
   fpsFrames++;
   if (now - fpsSince >= 500) {
-    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms` + (Module.rebelGpuMs ? `  ·  gpu ${Module.rebelGpuMs.toFixed(0)} ms` : "");
+    fpsEl.textContent = `${(fpsFrames * 1000 / (now - fpsSince)).toFixed(0)} fps  ·  worst ${fpsWorst.toFixed(0)} ms` + (Module.rebelGpuMs ? `  ·  gpu ${Module.rebelGpuMs.toFixed(0)} ms` : "") + netLine;
     fpsFrames = 0; fpsSince = now; fpsWorst = 0;
   }
+}
+// In a network game: the ping the server measures for us, the round trip to
+// the relay hub (web/net.js probe: a frame routed back to ourselves), and
+// how many probes came back.
+let netLine = '';
+function startNetOverlay(net) {
+  setInterval(() => net.probe(), 250);
+  setInterval(() => {
+    const p = net.probeStats();
+    const ping = Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1;
+    const loss = p.sent ? Math.round((1 - p.n / p.sent) * 100) : 0;
+    netLine = `\nping ${ping >= 0 ? ping + ' ms' : '-'}  ·  relay ${p.median ?? '-'} ms (worst ${p.max ?? '-'})` + (loss ? `  ·  loss ${loss}%` : '');
+  }, 2000);
 }
 // Alt+F toggles it (F8 is the game's console key); the page keeps the key.
 window.addEventListener('keydown', (e) => {
@@ -147,8 +160,7 @@ if (params.get('net')) {
     }
     // Round trips through the transport (and this page's event loop, which
     // the game shares), logged every 10 s.
-    setInterval(() => Module.rebelNet.probe(), 200);
-    setInterval(() => log('[net] rtt ' + JSON.stringify(Module.rebelNet.probeStats()) + ' ' + JSON.stringify(Module.rebelNet.stats)), 10000);
+    startNetOverlay(Module.rebelNet);
   } catch (e) {
     log('[net] ' + e.message);
   }
@@ -721,6 +733,7 @@ async function findMatch(serviceUrl, engineRunning) {
     Module.rebelNet = RebelNet.create(`${service}/room/${match.room}`);
     Module.rebelNet.log = (t) => log('[net] ' + t);
     await Module.rebelNet.ready;
+    startNetOverlay(Module.rebelNet);
     if (params.has('netrtc')) Module.rebelNet.enableRtc({ connectTo: '10.0.0.1' }).catch((e) => log('[net] rtc: ' + e.message));
     if (engineRunning) Module.ccall('Rebel_Online_Connect', null, ['string', 'string'], [match.server, name]);
     else Module.arguments.push('+connect', match.server, '+netplayername', name);

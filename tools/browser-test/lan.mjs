@@ -144,7 +144,7 @@ async function nodeServer() {
     for (const t of d.toString().split('\n').filter(Boolean)) {
       p.lines.push(`${stamp()} ${t}`);
       if (/Gameplay Pending|Gameplay in progress/i.test(t)) ready = true;
-      if (/\[net\]|\[mem\]|\[brain\]|\[nav\]|Loading level|abort|Assert|[Cc]lient|[Pp]layer|GDI :|NOD :|Gameplay/.test(t)) console.log(`${stamp()} server: ${t}`.slice(0, 260));
+      if (/\[net\]|\[perf\]|\[brain\]|\[nav\]|Loading level|abort|Assert|[Cc]lient|[Pp]layer|GDI :|NOD :|Gameplay/.test(t)) console.log(`${stamp()} server: ${t}`.slice(0, 260));
     }
   };
   proc.stdout.on('data', onData);
@@ -223,6 +223,11 @@ try {
     await clients[0].page.waitForTimeout(5000);
     for (const c of clients) await dump(c);
     if (host.proc && i % 4 === 0) host.proc.stdin.write('game_info\nplayer_info\n');
+  }
+  // The ping the server measures for each client (ms), a few samples.
+  for (let i = 0; i < 4 && clients.some((c) => c.star); i++) {
+    await clients[0].page.waitForTimeout(5000);
+    for (const c of clients) console.log(`${stamp()} ${c.name} ping ${await c.page.evaluate(() => (Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1))} ms`);
   }
   // Let textures and the spawn settle, then walk forward a little and check
   // the soldier moved.
