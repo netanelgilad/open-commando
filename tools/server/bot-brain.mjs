@@ -254,6 +254,8 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
   const spent = () => (stats.tokens * CLEF_USD_PER_M + planStats.tokens * PLANNER_USD_PER_M) / 1e6;
   let capped = false;
   const withinBudget = () => {
+    // Bots among themselves (no human in the game) play scripted: free.
+    if (!world?.players.some((p) => !p.bot)) return false;
     if (!capped && spent() > budgetUsd) {
       capped = true;
       out(`[brain] model budget reached ($${spent().toFixed(2)} of $${budgetUsd}): scripted from now on`);
