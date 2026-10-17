@@ -35,6 +35,9 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "sctextobj.h"
+#ifdef REBEL_PORTABLE
+#include "bots_web.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,6 +113,10 @@ void cScTextObj::Init(const WideStringClass &text, TextMessageEnum type, bool is
   default:
     DIE;
   }
+
+#ifdef REBEL_PORTABLE
+  Rebel_Bots_On_Chat(SenderId, (int)Type, Text);
+#endif
 
   //
   // The sender always gets to see his own sent messages

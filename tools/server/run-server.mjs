@@ -7,6 +7,7 @@
 //   node tools/server/run-server.mjs --net ws://127.0.0.1:8787/room/<name> \
 //     [--game <install dir>] [--bin build/wasm-release/bin] [--map C&C_Field.mix]
 //     [--players 16] [--name "Open Commando"] [--work /tmp/rebel-server]
+//     [--bot-brain scripted] [--bot-log bots.jsonl]
 //
 // Type console commands on stdin (game_info, player_info, amsg <text>, kick
 // <name>, quit...), as at the original server's console.
@@ -29,6 +30,9 @@ const engine = resolve(here, '../..');
 const { values: opt } = parseArgs({
   options: {
     net: { type: 'string', default: process.env.REBEL_NET },
+    // Bots' brain (bot-brain.mjs): off (the engine's own goal loop) or scripted.
+    'bot-brain': { type: 'string', default: process.env.REBEL_BOT_BRAIN || 'off' },
+    'bot-log': { type: 'string', default: process.env.REBEL_BOT_LOG }, // every decision, as JSON lines
     game: { type: 'string', default: process.env.REBEL_GAME_DIR || resolve(engine, '../game-data/renegade') },
     bin: { type: 'string', default: join(engine, 'build/wasm-release/bin') },
     work: { type: 'string', default: '/tmp/rebel-server' },
@@ -130,6 +134,7 @@ const recent = [];
 // What a lobby/matchmaker needs to know, from the server's own console output.
 const state = { ready: false, map: null, loaded: false, warmup: false, players: [] };
 let gameModule = null; // the game's Module once running
+let brain = null; // the bots' brain, if on (see below)
 const console_ = (line) => gameModule && gameModule.ccall('Rebel_Console_Command', null, ['string'], [line]);
 const out = (t) => {
   const line = `${stamp()} ${t}`;
@@ -140,7 +145,10 @@ const out = (t) => {
   let m;
   if (/Gameplay Pending|Gameplay in progress/.test(t)) state.ready = true;
   if ((m = /Loading level (\S+)/.exec(t))) { state.map = m[1]; state.loaded = false; }
-  if (/Level loaded OK/.test(t)) state.loaded = true;
+  if (/Level loaded OK/.test(t)) {
+    state.loaded = true;
+    if (brain) setTimeout(() => console_('bot_brain on'), 0); // between frames
+  }
   if ((m = /^Warmup (on|off)/.exec(t))) state.warmup = m[1] === 'on';
   if ((m = /Player (\S+) joined the game/.exec(t)) && !state.players.includes(m[1])) state.players.push(m[1]);
   if ((m = /Player (\S+) left the game/.exec(t))) state.players = state.players.filter((p) => p !== m[1]);
@@ -166,8 +174,15 @@ if (opt['status-port']) {
 net.log = (t) => out(`[net] ${t}`);
 await net.ready;
 
+if (opt['bot-brain'] !== 'off') {
+  const { createBrain } = await import('./bot-brain.mjs');
+  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out });
+}
+
 globalThis.rebelNodeModule = {
   rebelNet: net,
+  rebelBotState: (json) => brain?.onState(json),
+  rebelBotChat: (sender, type, text) => brain?.onChat(sender, type, text),
   rebelPlayerName: 'Host',
   print: out,
   printErr: out,

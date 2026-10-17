@@ -120,14 +120,24 @@ void NetworkObjectClass::Set_Network_ID(int id) {
 //	Get_Object_Dirty_Bits
 //
 ////////////////////////////////////////////////////////////////
-BYTE NetworkObjectClass::Get_Object_Dirty_Bits(int client_id) { return ClientStatus[client_id]; }
+// Client ids outside the table (bots are players with negative ids, see
+// Code/Platform/web/bots_web.cpp) have no network state: reads give nothing,
+// writes are dropped.
+static inline bool Is_Client_Slot(int client_id) { return client_id >= 0 && client_id < NetworkObjectClass::MAX_CLIENT_COUNT; }
+
+BYTE NetworkObjectClass::Get_Object_Dirty_Bits(int client_id) {
+  return Is_Client_Slot(client_id) ? ClientStatus[client_id] : 0;
+}
 
 ////////////////////////////////////////////////////////////////
 //
 //	Set_Object_Dirty_Bits
 //
 ////////////////////////////////////////////////////////////////
-void NetworkObjectClass::Set_Object_Dirty_Bits(int client_id, BYTE bits) { ClientStatus[client_id] = bits; }
+void NetworkObjectClass::Set_Object_Dirty_Bits(int client_id, BYTE bits) {
+  if (Is_Client_Slot(client_id))
+    ClientStatus[client_id] = bits;
+}
 
 ////////////////////////////////////////////////////////////////
 //
@@ -135,7 +145,7 @@ void NetworkObjectClass::Set_Object_Dirty_Bits(int client_id, BYTE bits) { Clien
 //
 ////////////////////////////////////////////////////////////////
 bool NetworkObjectClass::Get_Object_Dirty_Bit(int client_id, DIRTY_BIT dirty_bit) {
-  return ((ClientStatus[client_id] & dirty_bit) == dirty_bit);
+  return Is_Client_Slot(client_id) && ((ClientStatus[client_id] & dirty_bit) == dirty_bit);
 }
 
 ////////////////////////////////////////////////////////////////
@@ -162,6 +172,8 @@ void NetworkObjectClass::Clear_Object_Dirty_Bits() {
 //
 ////////////////////////////////////////////////////////////////
 void NetworkObjectClass::Set_Object_Dirty_Bit(int client_id, DIRTY_BIT dirty_bit, bool onoff) {
+  if (!Is_Client_Slot(client_id))
+    return;
   if (onoff) {
     ClientStatus[client_id] |= dirty_bit;
   } else {
@@ -200,7 +212,9 @@ void NetworkObjectClass::Set_Object_Dirty_Bit(DIRTY_BIT dirty_bit, bool onoff) {
 //	Is_Client_Dirty
 //
 ////////////////////////////////////////////////////////////////
-bool NetworkObjectClass::Is_Client_Dirty(int client_id) { return ClientStatus[client_id] != 0; }
+bool NetworkObjectClass::Is_Client_Dirty(int client_id) {
+  return Is_Client_Slot(client_id) && ClientStatus[client_id] != 0;
+}
 
 ////////////////////////////////////////////////////////////////
 //

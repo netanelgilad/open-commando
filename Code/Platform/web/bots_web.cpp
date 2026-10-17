@@ -27,6 +27,14 @@
 #include "playertype.h"
 #include "wwmath.h"
 #include "navgrid_web.h"
+#include "sctextobj.h"
+#include "vehicle.h"
+#include "damage.h"
+#include "physcoltest.h"
+#include "pscene.h"
+#include "lineseg.h"
+#include "castres.h"
+#include "widestring.h"
 #include "combat.h"
 #include "control.h"
 #include "consolemode.h"
@@ -71,9 +79,16 @@ struct Bot {
   double progressAt = 0;
   int stuck = 0;     // replans for being blocked
   int stuckRow = 0;  // ... in a row, without moving on
+  // Brain mode (bot_do): what to shoot while walking or standing.
+  int targetId = 0;      // a soldier or vehicle (object id), 0 = none
+  bool shootAt = false;  // ... or a point (a building)
+  Vector3 shootPoint;
+  bool dirty = false;    // a new order: act on it now
 };
 
 std::vector<Bot> Bots;
+bool Brain = false;      // bot_brain on: an outside brain decides (bot_do), see below
+double NextState = 0;
 int Fill = 0;            // bot_fill: keep this many players in the game
 double NextFill = 0;
 int NextId = -100;
@@ -186,11 +201,32 @@ void Think_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
     Plan(b, me, dest);
 }
 
+// One order to the soldier: walk to `move` (or stand), shooting at the
+// target if there is one.
+void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
+  ActionParamsStruct params;
+  params.Set_Basic((long)0, 60, 7000 + (-b.id));
+  if (move) {
+    params.Set_Movement(*move, 1.0f, 1.0f);
+    params.MovePathfind = false;
+  }
+  PhysicalGameObj *target = b.targetId ? GameObjManager::Find_PhysicalGameObj(b.targetId) : nullptr;
+  if (target && target->Get_Defense_Object()->Get_Health() <= 0)
+    target = nullptr;
+  if (target) {
+    params.Set_Attack(target, 80.0f, 0.5f, true);
+    b.accepted = s->Get_Action()->Attack(params);
+  } else if (b.shootAt) {
+    params.Set_Attack(b.shootPoint, 80.0f, 1.0f, true);
+    b.accepted = s->Get_Action()->Attack(params);
+  } else if (move) {
+    b.accepted = s->Get_Action()->Goto(params);
+  }
+}
+
 // Walking, every 1/4 s: the next waypoint of the path, straight at it (the
 // engine's planner can't plan on these maps); replan when stuck.
 void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
-  if (b.wp >= b.path.size())
-    return;
   size_t before = b.wp;
   while (b.wp < b.path.size()) {
     Vector3 d = b.path[b.wp] - me;
@@ -198,41 +234,41 @@ void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
       break;
     b.wp++;
   }
-  if (b.wp >= b.path.size())
-    return;
-  if ((me - b.progressPos).Length() > 1.5f) {
-    b.progressPos = me;
-    b.progressAt = now;
-    b.stuckRow = 0;
-  } else if (now - b.progressAt > 4000) {
-    // Blocked (another soldier, a vehicle, something the grid missed): jump,
-    // avoid the spot, plan again; still stuck after that, wander off a few
-    // meters first (the goal loop picks the goal up again).
-    b.progressAt = now;
-    b.stuck++;
-    b.stuckRow++;
-    s->Set_Boolean_Control(ControlClass::BOOLEAN_JUMP);
-    Vector3 ahead = b.path[b.wp] - me;
-    ahead.Z = 0;
-    if (ahead.Length() > 0.1f)
-      NavGrid::Block(me + ahead * (1.0f / ahead.Length()), 1.0f);
-    if (b.stuckRow >= 3) {
-      float a = (float)(rand() % 628) / 100.0f;
-      Plan(b, me, me + Vector3(6.0f * cosf(a), 6.0f * sinf(a), 0));
-    } else {
-      Plan(b, me, b.dest);
+  bool walking = b.wp < b.path.size();
+  if (walking) {
+    if ((me - b.progressPos).Length() > 1.5f) {
+      b.progressPos = me;
+      b.progressAt = now;
+      b.stuckRow = 0;
+    } else if (now - b.progressAt > 4000) {
+      // Blocked (another soldier, a vehicle, something the grid missed): jump,
+      // avoid the spot, plan again; still stuck after that, wander off a few
+      // meters first (the goal loop picks the goal up again).
+      b.progressAt = now;
+      b.stuck++;
+      b.stuckRow++;
+      s->Set_Boolean_Control(ControlClass::BOOLEAN_JUMP);
+      Vector3 ahead = b.path[b.wp] - me;
+      ahead.Z = 0;
+      if (ahead.Length() > 0.1f)
+        NavGrid::Block(me + ahead * (1.0f / ahead.Length()), 1.0f);
+      if (b.stuckRow >= 3 && !Brain) {
+        float a = (float)(rand() % 628) / 100.0f;
+        Plan(b, me, me + Vector3(6.0f * cosf(a), 6.0f * sinf(a), 0));
+      } else {
+        Plan(b, me, b.dest);
+      }
+      walking = b.wp < b.path.size();
     }
-    if (b.path.empty())
-      return;
   }
-  if (b.wp == before && b.lastGoto && now - b.lastGoto < 3000)
+  bool fighting = b.targetId || b.shootAt;
+  if (!walking && !fighting)
     return;
-  ActionParamsStruct params;
-  params.Set_Basic((long)0, 60, 7000 + (-b.id));
-  params.Set_Movement(b.path[b.wp], 1.0f, 1.0f);
-  params.MovePathfind = false;
-  b.accepted = s->Get_Action()->Goto(params);
+  if (!b.dirty && b.wp == before && b.lastGoto && now - b.lastGoto < (fighting ? 1500 : 3000))
+    return;
+  Order(b, s, walking ? &b.path[b.wp] : nullptr);
   b.lastGoto = now;
+  b.dirty = false;
 }
 
 Bot *Find(const char *name) {
@@ -347,6 +383,251 @@ public:
   }
 };
 
+// ---------------------------------------------------------------------------
+// Brain mode: the bots' decisions come from outside (tools/server/bot-brain.mjs:
+// scripted, decision models, language models). The server streams the world
+// as each bot may know it, 4 times a second, plus every chat line; the brain
+// answers with console commands:
+//
+//   bot_brain on|off
+//   bot_do <id> go <x> <y> <z>      walk there (walking grid)
+//   bot_do <id> stop
+//   bot_do <id> target <object id>  shoot at a soldier/vehicle (0: stop)
+//   bot_do <id> shoot <x> <y> <z>   shoot at a point (a building)
+//   bot_do <id> jump
+//   bot_do <id> say team|all <text>
+
+EM_JS(void, Rebel_JS_Bot_State, (const char *json), {
+  if (Module.rebelBotState) Module.rebelBotState(UTF8ToString(json));
+});
+EM_JS(void, Rebel_JS_Bot_Chat, (int sender, int type, const char *text), {
+  if (Module.rebelBotChat) Module.rebelBotChat(sender, type, UTF8ToString(text));
+});
+
+std::string Narrow(const WideStringClass &w) {
+  std::string out;
+  for (const wchar_t *c = w.Peek_Buffer(); c && *c; c++)
+    out += (*c >= 32 && *c < 127) ? (char)*c : '?';
+  return out;
+}
+
+void Json_String(std::string &out, const std::string &v) {
+  out += '"';
+  for (char c : v) {
+    if (c == '"' || c == '\\')
+      out += '\\';
+    out += c;
+  }
+  out += '"';
+}
+
+void Json_Pos(std::string &out, const Vector3 &p) {
+  char buf[96];
+  snprintf(buf, sizeof(buf), "[%.1f,%.1f,%.1f]", p.X, p.Y, p.Z);
+  out += buf;
+}
+
+const char *Team_Name(int t) { return t == PLAYERTYPE_GDI ? "GDI" : t == PLAYERTYPE_NOD ? "Nod" : "none"; }
+
+float Health_Of(DamageableGameObj *o) {
+  DefenseObjectClass *d = o->Get_Defense_Object();
+  float max = d->Get_Health_Max() + d->Get_Shield_Strength_Max();
+  return max > 0 ? (d->Get_Health() + d->Get_Shield_Strength()) / max : 0;
+}
+
+// Line of sight from a bot's eyes (static geometry only).
+bool Can_See(const Vector3 &eye, PhysicalGameObj *o) {
+  Vector3 at = o->Get_Bullseye_Position();
+  if ((at - eye).Length() > 120.0f)
+    return false;
+  CastResultStruct res;
+  LineSegClass ray(eye, at);
+  PhysRayCollisionTestClass test(ray, &res, BULLET_COLLISION_GROUP, COLLISION_TYPE_PROJECTILE);
+  test.CheckDynamicObjs = false;
+  COMBAT_SCENE->Cast_Ray(test);
+  return res.Fraction >= 1.0f;
+}
+
+void Emit_State(double now) {
+  std::string j;
+  j.reserve(8192);
+  char buf[256];
+  snprintf(buf, sizeof(buf), "{\"t\":%.0f,\"map\":", now);
+  j += buf;
+  Json_String(j, The_Game()->Get_Map_Name().Peek_Buffer());
+  j += ",\"buildings\":[";
+  bool first = true;
+  for (SLNode<BuildingGameObj> *n = GameObjManager::Get_Building_Game_Obj_List()->Head(); n; n = n->Next()) {
+    BuildingGameObj *bld = n->Data();
+    Vector3 p;
+    bld->Get_Position(&p);
+    snprintf(buf, sizeof(buf), "%s{\"id\":%d,\"team\":\"%s\",\"hp\":%.2f,\"pos\":", first ? "" : ",", bld->Get_ID(),
+             Team_Name(bld->Get_Player_Type()), bld->Is_Destroyed() ? 0.0f : Health_Of(bld));
+    j += buf;
+    Json_Pos(j, p);
+    j += ",\"name\":";
+    Json_String(j, bld->Get_Definition().Get_Name());
+    j += "}";
+    first = false;
+  }
+  j += "],\"players\":[";
+  first = true;
+  std::vector<SoldierGameObj *> soldiers;
+  for (SLNode<cPlayer> *n = cPlayerManager::Get_Player_Object_List()->Head(); n; n = n->Next()) {
+    cPlayer *pl = n->Data();
+    if (!pl->Get_Is_Active().Is_True())
+      continue;
+    SoldierGameObj *so = GameObjManager::Find_Soldier_Of_Client_ID(pl->Get_Id());
+    Vector3 p(0, 0, 0);
+    if (so) {
+      so->Get_Position(&p);
+      soldiers.push_back(so);
+    }
+    VehicleGameObj *veh = so ? so->Get_Vehicle() : nullptr;
+    snprintf(buf, sizeof(buf),
+             "%s{\"id\":%d,\"obj\":%d,\"team\":\"%s\",\"bot\":%s,\"alive\":%s,\"hp\":%.2f,\"credits\":%d,\"kills\":%d,"
+             "\"deaths\":%d,\"vehicle\":%d,\"pos\":",
+             first ? "" : ",", pl->Get_Id(), so ? so->Get_ID() : 0, Team_Name(pl->Get_Player_Type()),
+             pl->Get_Id() < 0 ? "true" : "false", so ? "true" : "false", so ? Health_Of(so) : 0.0f,
+             (int)pl->Get_Money(), pl->Get_Kills(), pl->Get_Deaths(), veh ? veh->Get_ID() : 0);
+    j += buf;
+    Json_Pos(j, p);
+    j += ",\"name\":";
+    Json_String(j, Narrow(pl->Get_Name()));
+    j += ",\"char\":";
+    Json_String(j, so ? so->Get_Definition().Get_Name() : "");
+    j += "}";
+    first = false;
+  }
+  j += "],\"vehicles\":[";
+  first = true;
+  std::vector<VehicleGameObj *> vehicles;
+  for (SLNode<SmartGameObj> *n = GameObjManager::Get_Smart_Game_Obj_List()->Head(); n; n = n->Next()) {
+    VehicleGameObj *v = n->Data()->As_VehicleGameObj();
+    if (!v || v->Get_Defense_Object()->Get_Health() <= 0)
+      continue;
+    vehicles.push_back(v);
+    Vector3 p;
+    v->Get_Position(&p);
+    SoldierGameObj *driver = v->Get_Driver();
+    snprintf(buf, sizeof(buf), "%s{\"id\":%d,\"team\":\"%s\",\"hp\":%.2f,\"driver\":%d,\"pos\":", first ? "" : ",",
+             v->Get_ID(), Team_Name(v->Get_Player_Type()), Health_Of(v), driver ? driver->Get_ID() : 0);
+    j += buf;
+    Json_Pos(j, p);
+    j += ",\"name\":";
+    Json_String(j, v->Get_Definition().Get_Name());
+    j += "}";
+    first = false;
+  }
+  j += "],\"bots\":[";
+  first = true;
+  for (Bot &b : Bots) {
+    SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
+    snprintf(buf, sizeof(buf), "%s{\"id\":%d,\"waypoint\":%d,\"path\":%d,\"stuck\":%d,\"target\":%d,\"sees\":[",
+             first ? "" : ",", b.id, (int)b.wp, (int)b.path.size(), b.stuckRow, b.targetId);
+    j += buf;
+    first = false;
+    if (!s)
+      {
+        j += "]}";
+        continue;
+      }
+    Vector3 eye;
+    s->Get_Position(&eye);
+    eye.Z += 1.6f;
+    bool any = false;
+    // Enemy soldiers on foot and enemy vehicles in line of sight.
+    for (SoldierGameObj *o : soldiers)
+      if (o != s && o->Get_Player_Type() != b.team && !o->Get_Vehicle() && Can_See(eye, o)) {
+        snprintf(buf, sizeof(buf), "%s%d", any ? "," : "", o->Get_ID());
+        j += buf;
+        any = true;
+      }
+    for (VehicleGameObj *v : vehicles)
+      if (v->Get_Player_Type() != b.team && v->Get_Player_Type() >= 0 && Can_See(eye, v)) {
+        snprintf(buf, sizeof(buf), "%s%d", any ? "," : "", v->Get_ID());
+        j += buf;
+        any = true;
+      }
+    j += "],\"dest\":";
+    Json_Pos(j, b.dest);
+    j += "}";
+  }
+  j += "]}";
+  Rebel_JS_Bot_State(j.c_str());
+}
+
+class BotBrainConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_brain"; }
+  const char *Get_Help(void) override { return "BOT_BRAIN on|off - bots take orders from an outside brain (bot_do)."; }
+  void Activate(const char *input) override {
+    Brain = input && strstr(input, "on");
+    Say("bot brain %s\n", Brain ? "on" : "off");
+  }
+};
+
+class BotDoConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_do"; }
+  const char *Get_Help(void) override { return "BOT_DO <id> go x y z|stop|target <obj>|shoot x y z|jump|say team|all <text>"; }
+  void Activate(const char *input) override {
+    int id = 0, n = 0;
+    char verb[16] = {0};
+    if (!input || sscanf(input, "%d %15s %n", &id, verb, &n) < 2)
+      return;
+    const char *rest = input + n;
+    Bot *bot = nullptr;
+    for (Bot &b : Bots)
+      if (b.id == id)
+        bot = &b;
+    if (!bot)
+      return;
+    Bot &b = *bot;
+    SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
+    float x, y, z;
+    b.dirty = true;
+    if (!strcmp(verb, "go") && sscanf(rest, "%f %f %f", &x, &y, &z) == 3) {
+      b.point = Vector3(x, y, z);
+      if (s) {
+        Vector3 me;
+        s->Get_Position(&me);
+        Plan(b, me, b.point);
+      }
+    } else if (!strcmp(verb, "stop")) {
+      b.path.clear();
+      b.wp = 0;
+      if (s) {
+        Vector3 me;
+        s->Get_Position(&me);
+        Order(b, s, &me);
+      }
+    } else if (!strcmp(verb, "target")) {
+      b.targetId = atoi(rest);
+      b.shootAt = false;
+    } else if (!strcmp(verb, "shoot") && sscanf(rest, "%f %f %f", &x, &y, &z) == 3) {
+      b.shootAt = true;
+      b.shootPoint = Vector3(x, y, z);
+      b.targetId = 0;
+    } else if (!strcmp(verb, "hold_fire")) {
+      b.shootAt = false;
+      b.targetId = 0;
+    } else if (!strcmp(verb, "jump")) {
+      if (s)
+        s->Set_Boolean_Control(ControlClass::BOOLEAN_JUMP);
+    } else if (!strcmp(verb, "say")) {
+      bool team = !strncmp(rest, "team ", 5);
+      const char *text = strchr(rest, ' ');
+      if (!text || !text[1] || !cNetwork::I_Am_Server())
+        return;
+      WideStringClass wide;
+      wide.Convert_From(std::string(text + 1).substr(0, 200).c_str());
+      cScTextObj *msg = new cScTextObj;
+      msg->Init(wide, team ? TEXT_MESSAGE_TEAM : TEXT_MESSAGE_PUBLIC, false, b.id);
+    }
+  }
+};
+
 } // namespace
 
 void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
@@ -355,10 +636,17 @@ void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
   list.Add(new BotListConsoleFunctionClass());
   list.Add(new BotOrderConsoleFunctionClass());
   list.Add(new BotFillConsoleFunctionClass());
+  list.Add(new BotBrainConsoleFunctionClass());
+  list.Add(new BotDoConsoleFunctionClass());
   list.Add(new BotNavConsoleFunctionClass());
 }
 
 int Rebel_Bots_Count(void) { return (int)Bots.size(); }
+
+void Rebel_Bots_On_Chat(int sender, int type, const WideStringClass &text) {
+  if (Brain)
+    Rebel_JS_Bot_Chat(sender, type, Narrow(text).c_str());
+}
 
 // bot_fill: one bot in or out every second until the game has Fill players
 // and even teams; humans joining push bots out.
@@ -388,6 +676,10 @@ void Rebel_Bots_Think(void) {
     Fill_Bots(now);
   if (Bots.empty())
     return;
+  if (Brain && now >= NextState && !CombatManager::Is_Loading_Level()) {
+    NextState = now + 250;
+    Emit_State(now);
+  }
   NavGrid::Ensure(); // builds over a few seconds after a map loads
   // Forget bots whose player is gone (a map change resets players).
   for (int i = (int)Bots.size() - 1; i >= 0; i--)
@@ -405,7 +697,8 @@ void Rebel_Bots_Think(void) {
     }
     Vector3 me;
     s->Get_Position(&me);
-    Think_Bot(b, s, me, now);
+    if (!Brain)
+      Think_Bot(b, s, me, now);
     Step_Bot(b, s, me, now);
   }
 }

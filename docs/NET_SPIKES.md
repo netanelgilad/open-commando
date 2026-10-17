@@ -458,3 +458,40 @@ map loaded.
   object, so it can't target a building (crash): bots aim at a point.
 - Left: Nod bots are slow down the Hand of Nod's stairs; bots don't buy
   characters or vehicles; no commander yet.
+
+## S15: a brain for the bots, step 1 (hooks, blackboard, scripted)
+
+The plan for "AI that feels human": each bot gets a brain with three layers.
+A language-model agent loop (slow: seconds, on events) owns the bot's
+character: candidate plans, standing orders, memory, what it says. A
+decision model (Clef-flash, ~40 ms, typed questions answered with
+probabilities) decides the moment 2-4 times a second: which plan, how to
+move, what to shoot, what to call out, whether to rethink (waking the loop).
+The engine does the rest every frame. The two models share a blackboard per
+bot; bots coordinate only through real game chat, like players.
+
+Step 1 (this), no models yet:
+- Engine (`bots_web.cpp`, brain mode): `bot_brain on` stops the bots' own
+  goal loop; the server streams the world 4 times a second (`Module.
+  rebelBotState`: buildings with health, players with health/credits/
+  kills/deaths/character/vehicle, vehicles, and per bot what it can see,
+  by line of sight) and every chat line (`Module.rebelBotChat`, hooked in
+  cScTextObj::Init). The brain acts through `bot_do <id> go x y z | stop |
+  target <obj> | shoot x y z | hold_fire | jump | say team|all <text>`;
+  walking uses the walking grid, shooting while walking is the engine's
+  attack action with a move.
+- Found on the way: every team chat line marked the message for each team
+  member's network slot by player id, so bots (negative ids) wrote outside
+  the per-client table. NetworkObjectClass now ignores client ids outside
+  it.
+- `tools/server/bot-brain.mjs` (`run-server.mjs --bot-brain scripted
+  [--bot-log file]`, or REBEL_BOT_BRAIN/REBEL_BOT_LOG): named places from
+  the buildings (each building, each base, the middle), a per-bot view
+  (me, enemies in sight with kind/health/distance/place, teammates, base
+  status, alerts, last chat lines, life events, blackboard), the moment's
+  questions in Clef's format (plan / move / target / callout / rethink,
+  options built from what is possible now), a scripted planner and decider
+  in the models' seats, answers turned into bot_do (only what changed),
+  callouts as written lines, and a JSON-lines log of every decision.
+- Verified: 3v3 bots under the scripted brain fight and score (about 700
+  decisions a minute); their team chat shows on a human's screen.
