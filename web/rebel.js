@@ -141,7 +141,7 @@ var Module = {
   arguments: [...(params.get('args') || '').split(' ').filter(Boolean), '--res=' + gameResolution()],
   print: (t) => log(t),
   printErr: (t) => log(t),
-  locateFile: (p) => p,
+  locateFile: (p) => versioned(p),
   setStatus: (t) => { if (t) log('[emscripten] ' + t); },
   onAbort: (what) => {
     // Emscripten hands us the original error object: keep its wasm stack.
@@ -538,6 +538,12 @@ async function forgetGameData() {
 
 /* ------------------------------------------------------------------- boot */
 
+// The deployed build's version (tools/deploy-web.sh puts it in a meta tag):
+// asked for with every game file, so a new build never meets cached files
+// of the last one (the engine's .js and .wasm must come from the same build).
+const BUILD_VERSION = document.querySelector('meta[name="rebel-version"]')?.content || '';
+const versioned = (p) => (BUILD_VERSION ? `${p}?v=${BUILD_VERSION}` : p);
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -576,7 +582,7 @@ async function boot() {
   $('forget').onclick = (e) => { e.preventDefault(); forgetGameData(); };
   setStatus('Loading the engine…');
   const ready = new Promise((resolve) => { Module.onRuntimeInitialized = resolve; });
-  await loadScript('renegade.js');
+  await loadScript(versioned('renegade.js'));
   await ready;
   // The showroom (default): the engine boots now, straight to a 3D front
   // screen with a soldier (Code/Platform/web/showroom_web.cpp), and the

@@ -10,7 +10,8 @@ const BinkPlayer = (() => {
     if (!modulePromise) {
       modulePromise = new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = 'bink.js';
+        const v = document.querySelector('meta[name="rebel-version"]')?.content;
+        s.src = v ? `bink.js?v=${v}` : 'bink.js';
         s.onload = () => createBinkModule().then(resolve, reject);
         s.onerror = () => reject(new Error('could not load bink.js'));
         document.head.appendChild(s);

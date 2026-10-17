@@ -24,12 +24,17 @@ cp web/*.html web/*.js dist/
 cp "$bin/renegade.js" "$bin/renegade.wasm" build/bink/bink.js build/bink/bink.wasm dist/
 # Public build: no server-side game data; the source commit for the GPL
 # source offer, linked from the page.
-python3 - "$commit" "$dirty" <<'PY'
-import sys
-commit, dirty = sys.argv[1], sys.argv[2]
+# The build's version: a hash of what's deployed. The page asks for every
+# script and game file with ?v=<version>, so a browser never mixes this
+# build's files with cached ones from the last (index.html isn't cached).
+version=$(cat dist/*.js dist/*.wasm | shasum | cut -c1-12)
+python3 - "$commit" "$dirty" "$version" <<'PY'
+import sys, re
+commit, dirty, version = sys.argv[1], sys.argv[2], sys.argv[3]
 p = 'dist/index.html'
 s = open(p).read()
-s = s.replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="rebel-gamedata" content="none">', 1)
+s = s.replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="rebel-gamedata" content="none">\n<meta name="rebel-version" content="' + version + '">', 1)
+s = re.sub(r'<script src="([\w.-]+\.js)">', lambda m: '<script src="' + m.group(1) + '?v=' + version + '">', s)
 link = f', build <a href="https://github.com/netanelgilad/open-commando/tree/{commit}">{commit}</a>{(" " + dirty) if dirty else ""}'
 s = s.replace('<span id="build"></span>', '<span id="build">' + link + '</span>', 1)
 open(p, 'w').write(s)
@@ -51,7 +56,7 @@ cat > dist/_headers <<'H'
 /index.html
   Cache-Control: no-cache
 H
-echo "dist/ ready ($(du -sh dist | cut -f1)), build $commit$dirty"
+echo "dist/ ready ($(du -sh dist | cut -f1)), build $commit$dirty, version $version"
 if [ "${1:-}" = "--publish" ]; then
   wrangler deploy --config wrangler.jsonc
 fi
