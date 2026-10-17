@@ -185,7 +185,13 @@ NavGrid::Kind Grid_For(const Bot &b) {
 
 void Plan(Bot &b, const Vector3 &me, const Vector3 &dest) {
   b.dest = dest;
-  NavGrid::Find_Path(Grid_For(b), me, dest, b.path);
+  // On foot, never to a spot in a tiberium field (the middle of some maps
+  // is one): the nearest safe ground instead.
+  NavGrid::Kind kind = Grid_For(b);
+  Vector3 safe;
+  if (kind == NavGrid::SOLDIER && NavGrid::On_Tiberium(dest) && NavGrid::Off_Tiberium(dest, safe))
+    b.dest = safe;
+  NavGrid::Find_Path(kind, me, b.dest, b.path);
   b.wp = 0;
   b.lastGoto = 0;
 }
@@ -448,7 +454,8 @@ public:
 //   bot_do <id> shoot <x> <y> <z>   shoot at a point (a building)
 //   bot_do <id> buy character|vehicle <n>   (the team's shop, see "shop")
 //   bot_do <id> enter [vehicle]     get into the empty vehicle next to it (no id: the use key)
-//   bot_do <id> maneuver steer_left|steer_right|reverse_left|reverse_right|replan|wait|get_out
+//   bot_do <id> maneuver steer_left|steer_right|reverse_left|reverse_right|strafe_left|strafe_right|replan|wait|get_out
+//   bot_do <id> leave_tiberium     walk off the field by the shortest way
 //   bot_do <id> jump
 //   bot_do <id> say team|all <text>
 
@@ -652,6 +659,10 @@ void Emit_State(double now) {
       s->Get_Vehicle()->Get_Velocity(vel);
     else
       s->Get_Velocity(vel);
+    Vector3 here;
+    s->Get_Position(&here);
+    snprintf(buf, sizeof(buf), "\"tiberium\":%s,", !s->Get_Vehicle() && NavGrid::On_Tiberium(here) ? "true" : "false");
+    j += buf;
     snprintf(buf, sizeof(buf), "\"feel\":[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f],\"speed\":%.1f,\"driving\":%s,\"maneuver\":%s,\"sees\":[",
              f[0], f[1], f[2], f[3], f[4], f[5], vel.Length(), s->Get_Vehicle() ? "true" : "false",
              b.detour || now < b.waitUntil ? "true" : "false");
@@ -794,7 +805,11 @@ public:
         detour(me - fwd * (far_ * 0.6f) + left * (side * 0.5f), true);
       else if (strstr(rest, "reverse_right"))
         detour(me - fwd * (far_ * 0.6f) - left * (side * 0.5f), true);
-      else if (strstr(rest, "replan")) {
+      else if (strstr(rest, "strafe_left") || strstr(rest, "strafe_right")) {
+        // A quick side-step, still shooting (the order keeps the target).
+        detour(me + left * (strstr(rest, "left") ? 3.5f : -3.5f), false);
+        b.detourUntil = now + 1500;
+      } else if (strstr(rest, "replan")) {
         NavGrid::Block(Grid_For(b), me + fwd * (vehicle ? 4.0f : 1.5f), vehicle ? 3.0f : 1.0f);
         Plan(b, me, b.dest);
       } else if (strstr(rest, "wait")) {
@@ -802,6 +817,17 @@ public:
         Order(b, s, &me);
       } else if (strstr(rest, "get_out") && vehicle) {
         s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
+      }
+    } else if (!strcmp(verb, "leave_tiberium") && s) {
+      // Out of the field by the shortest way, then on with the plan.
+      Vector3 me, out;
+      s->Get_Position(&me);
+      if (NavGrid::Off_Tiberium(me, out)) {
+        b.detour = true;
+        b.detourBackup = false;
+        b.detourPoint = out;
+        b.detourUntil = emscripten_get_now() + 5000;
+        b.lastGoto = 0;
       }
     } else if (!strcmp(verb, "jump")) {
       if (s)

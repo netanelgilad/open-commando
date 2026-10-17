@@ -84,21 +84,121 @@ function placeOf(places, pos) {
   return best.d < 25 ? `${best.p.building ? 'at' : 'in'} ${best.p.name}` : `toward ${best.p.name}`;
 }
 
+// --- Team organization ------------------------------------------------------
+// Human teams split up: some push the main target, some flank, someone stays
+// home, someone hunts, an engineer type keeps buildings up. Every bot gets a
+// role when it joins (balanced per team) and a squad of 1-3; each squad gets
+// its own objective, spread over the enemy buildings and routes.
+const ROLES = [
+  { role: 'assault', share: 0.35, squad: 3, text: 'push enemy buildings with your squad' },
+  { role: 'flanker', share: 0.2, squad: 2, text: 'go around the sides and hit the enemy where they are not looking' },
+  { role: 'defender', share: 0.15, squad: 1, text: 'guard our base and buildings, intercept attackers' },
+  { role: 'hunter', share: 0.15, squad: 2, text: 'hunt enemy soldiers and harvesters in the field' },
+  { role: 'support', share: 0.15, squad: 1, text: 'back up an assault squad: cover them, repair and heal if you can' },
+];
+
+function createTeams() {
+  const members = new Map(); // bot id -> { team, role, squad }
+  const squads = new Map(); // squad id -> { id, team, role, members: [ids], objective, objectiveAt }
+  let next = 1;
+  return {
+    of: (id) => members.get(id),
+    squad: (id) => squads.get(members.get(id)?.squad),
+    join(id, team) {
+      const m = members.get(id);
+      if (m && m.team === team) return m;
+      if (m) this.leave(id);
+      const mine = [...members.values()].filter((x) => x.team === team);
+      const n = mine.length + 1;
+      // The role furthest below its share.
+      const pick = ROLES.map((r) => ({ r, gap: r.share * n - mine.filter((x) => x.role === r.role).length })).sort((a, b) => b.gap - a.gap)[0].r;
+      let sq = [...squads.values()].find((q) => q.team === team && q.role === pick.role && q.members.length < pick.squad);
+      if (!sq) {
+        sq = { id: `${team}-${next++}`, team, role: pick.role, members: [], objective: null, objectiveAt: 0 };
+        squads.set(sq.id, sq);
+      }
+      sq.members.push(id);
+      const entry = { team, role: pick.role, squad: sq.id, slot: sq.members.length - 1 };
+      members.set(id, entry);
+      return entry;
+    },
+    leave(id) {
+      const m = members.get(id);
+      if (!m) return;
+      members.delete(id);
+      const sq = squads.get(m.squad);
+      if (sq) {
+        sq.members = sq.members.filter((x) => x !== id);
+        if (!sq.members.length) squads.delete(sq.id);
+      }
+    },
+    squadsOf: (team) => [...squads.values()].filter((q) => q.team === team),
+  };
+}
+
+// A squad's objective, spread over the enemy buildings (and the field for
+// hunters, our base for defenders); kept for a minute, or until its target
+// falls.
+function squadObjective(teams, sq, world, places) {
+  const now = Date.now();
+  const enemy = enemyOf(sq.team);
+  const alive = (id) => world.buildings.find((b) => b.id === id && b.hp > 0);
+  if (sq.objective && now - sq.objectiveAt < 60000 && (!sq.objective.building || alive(sq.objective.building))) return sq.objective;
+  const theirs = world.buildings.filter((b) => b.team === enemy && b.hp > 0).sort((a, b) => a.hp - b.hp);
+  const ours = world.buildings.filter((b) => b.team === sq.team && b.hp > 0).sort((a, b) => a.hp - b.hp);
+  const same = teams.squadsOf(sq.team).filter((q) => q.role === sq.role);
+  const k = Math.max(0, same.indexOf(sq));
+  let o = null;
+  if ((sq.role === 'assault' || sq.role === 'flanker') && theirs.length) {
+    const b = theirs[(k + (sq.role === 'flanker' ? 1 : 0)) % theirs.length];
+    o = { kind: 'attack', building: b.id, text: `${sq.role === 'flanker' ? 'flank and hit' : 'attack'} the enemy ${buildingName(b)}` };
+    if (sq.role === 'flanker') {
+      // A point well off the line between the bases, alternating sides.
+      const base = (t) => places.find((p) => p.base && p.team === t)?.pos;
+      const a = base(sq.team), e = base(enemy);
+      if (a && e) {
+        const mid = [(a[0] + e[0]) / 2, (a[1] + e[1]) / 2, (a[2] + e[2]) / 2];
+        const d = [e[0] - a[0], e[1] - a[1]], len = Math.hypot(d[0], d[1]) || 1;
+        const side = k % 2 ? 1 : -1;
+        o.via = [mid[0] - (d[1] / len) * 60 * side, mid[1] + (d[0] / len) * 60 * side, mid[2]];
+        o.text += ` by the ${side > 0 ? 'left' : 'right'} flank`;
+      }
+    }
+  } else if (sq.role === 'defender' && ours.length) {
+    const b = ours[k % ours.length];
+    o = { kind: 'defend', building: b.id, text: `guard our ${buildingName(b)}` };
+  } else if (sq.role === 'hunter') {
+    const harvester = world.vehicles.find((v) => v.team === enemy && /harvester/i.test(v.name) && v.hp > 0);
+    o = harvester && k % 2 === 0 ? { kind: 'go', pos: harvester.pos, text: 'hunt the enemy harvester' } : { kind: 'go', place: 'the middle', text: 'hunt enemy soldiers in the field' };
+  } else if (theirs.length) {
+    o = { kind: 'attack', building: theirs[0].id, text: `back up the attack on the enemy ${buildingName(theirs[0])}` };
+  }
+  sq.objective = o;
+  sq.objectiveAt = now;
+  return o;
+}
+
 // --- The scripted planner (a language model takes this seat later) ----------
-// Plans are what the decider picks between, moment to moment.
-function scriptedPlan(view) {
-  const enemy = enemyOf(view.me.team);
-  const targets = view.world.buildings.filter((b) => b.team === enemy && b.hp > 0);
-  const own = view.world.buildings.filter((b) => b.team === view.me.team && b.hp > 0);
-  const weakest = targets.sort((a, b) => a.hp - b.hp)[0];
-  const hurt = own.filter((b) => b.hp < 0.9).sort((a, b) => a.hp - b.hp)[0];
+// Plans are what the decider picks between, moment to moment: the squad's
+// objective first, then defending the base, then hunting.
+function scriptedPlan(view, org) {
   const plans = [];
-  if (weakest) plans.push({ id: 'attack', text: `attack the enemy ${buildingName(weakest)} (${pct(weakest.hp)})`, building: weakest.id });
-  if (own.length) {
+  const own = view.world.buildings.filter((b) => b.team === view.me.team && b.hp > 0);
+  const hurt = own.filter((b) => b.hp < 0.9).sort((a, b) => a.hp - b.hp)[0];
+  if (org?.objective) {
+    const o = org.objective;
+    const plan = { id: org.role, text: o.text };
+    if (o.building) plan.building = o.building;
+    if (o.place) plan.place = o.place;
+    if (o.pos) plan.pos = o.pos;
+    if (o.via) plan.via = o.via;
+    plans.push(plan);
+  }
+  if (own.length && org?.role !== 'defender') {
     const b = hurt || own[Math.floor(Math.random() * own.length)];
     plans.push({ id: 'defend', text: `defend our ${buildingName(b)} (${pct(b.hp)})`, building: b.id });
   }
-  plans.push({ id: 'hunt', text: 'hunt enemy soldiers in the middle of the map', place: 'the middle' });
+  if (org?.role !== 'hunter') plans.push({ id: 'hunt', text: 'hunt enemy soldiers in the middle of the map', place: 'the middle' });
   return { plans, orders: [] };
 }
 
@@ -119,7 +219,7 @@ function scriptedDecide(state, questions) {
       const close = seen.filter((e) => e.distance < 70).sort((a, b) => a.distance - b.distance)[0];
       answers[id] = one(opts, close && opts.includes(`enemy_${close.id}`) ? `enemy_${close.id}` : opts.find((o) => o.startsWith('enemy_')) || (opts.includes('building') ? 'building' : 'none'));
     } else if (id === 'move') {
-      const pick = me.health < 0.25 && opts.includes('fall_back') ? 'fall_back' : seen.some((e) => e.distance < 25) && opts.includes('hold') ? 'hold' : 'advance';
+      const pick = opts.includes('leave_tiberium') ? 'leave_tiberium' : me.health < 0.25 && opts.includes('fall_back') ? 'fall_back' : seen.some((e) => e.distance < 25) && opts.includes('strafe') ? 'strafe' : opts.includes('join_squad') ? 'join_squad' : 'advance';
       answers[id] = one(opts, pick);
     } else if (id === 'callout') {
       const pick = baseAttacked && opts.includes('base_under_attack') ? 'base_under_attack' : me.health < 0.3 && seen.length ? 'need_help' : seen.length >= 2 ? 'enemies_spotted' : 'none';
@@ -158,7 +258,8 @@ function planPrompt(view, persona, notes, reason, options) {
   const s = view;
   const lines = [
     `You are ${s.me.name.replace(/^\[BOT\]\s*/, '')}, a ${s.me.character} on team ${s.me.team} in a Command & Conquer: Renegade multiplayer match (C&C mode: destroy all enemy buildings). Personality: ${persona.style}.`,
-    `You are ${s.me.place}, health ${pct(s.me.health)}, ${s.me.credits} credits, ${s.me.kills} kills, ${s.me.deaths} deaths.`,
+    `You are ${s.me.place}, health ${pct(s.me.health)}, ${s.me.credits} credits, ${s.me.kills} kills, ${s.me.deaths} deaths.${s.on_tiberium ? ' You are standing in tiberium: it hurts.' : ''}`,
+    `Your role: ${s.squad.role} (${s.squad.role_means}). Your squad${s.squad.mates.length ? `: ${s.squad.mates.map((m) => `${m.name} ${m.distance} m away`).join(', ')}` : ' is just you'}; its objective: ${s.squad.objective}. Work with your squad, not the whole team: the team spreads over different targets and routes, like real players do. Tiberium fields hurt soldiers on foot: go around them.`,
     `Buildings: ${s.buildings.map((b) => `${b.side} ${b.name} ${b.health}`).join(', ')}.`,
     `Teammates: ${s.teammates.map((t) => `${t.name} ${t.place}${t.health < 0.5 ? ' (hurt)' : ''}`).join('; ') || 'none alive'}.`,
     shopLine(s),
@@ -281,6 +382,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   let pending = false;
   const chat = []; // {t, from, team, text, to: 'all'|team}
   const bots = new Map(); // id -> blackboard and memory
+  const teams = createTeams(); // roles and squads
 
   const stats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null };
   const model = (mode === 'clef' || mode === 'hybrid') && ai?.url ? clefDecider(ai, stats) : null;
@@ -387,6 +489,22 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     return {
       world,
       me: { id: me.id, name: me.name, team: me.team, health: +me.hp.toFixed(2), credits: me.credits, character: characterName(me.char), in_vehicle: me.vehicle ? characterName(world.vehicles.find((v) => v.id === me.vehicle)?.name) : null, place: placeOf(places, me.pos), pos: me.pos, kills: me.kills, deaths: me.deaths },
+      squad: (() => {
+        const org = teams.join(me.id, me.team);
+        const sq = teams.squad(me.id);
+        bb.org = { role: org.role, slot: org.slot, objective: squadObjective(teams, sq, world, places) };
+        const mates = sq.members.filter((x) => x !== me.id).map((x) => world.players.find((p) => p.id === x)).filter(Boolean);
+        const lead = sq.members[0] !== me.id ? world.players.find((p) => p.id === sq.members[0] && p.alive) : null;
+        bb.leader = lead ? lead.pos : null;
+        return {
+          role: org.role,
+          role_means: ROLES.find((r) => r.role === org.role).text,
+          objective: bb.org.objective?.text || 'none',
+          mates: mates.map((m) => ({ name: m.name, distance: Math.round(dist(me.pos, m.pos)), alive: m.alive })),
+          leader_distance: lead ? Math.round(dist(me.pos, lead.pos)) : null,
+        };
+      })(),
+      on_tiberium: !!bot.tiberium,
       enemies_in_sight: enemies,
       surroundings: bot.feel && {
         driving: bot.driving,
@@ -415,6 +533,15 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const target = state.enemies_in_sight.length ? {} : { none: 'Nothing to shoot at.' };
     for (const e of state.enemies_in_sight) target[`enemy_${e.id}`] = `Shoot the ${e.kind}${e.name ? ` (${e.name})` : ''}, ${e.distance} m away, health ${pct(e.health)}.`;
     if (objective?.building && objective.distance < 45 && objective.enemy) target.building = `Shoot the enemy ${objective.name}.`;
+    // How to move: only what makes sense now.
+    const moves = { advance: `Go on with the plan: move toward ${objective?.name || 'the objective'}.` };
+    if (state.on_tiberium) moves.leave_tiberium = 'Get off the tiberium now: it is hurting you.';
+    if (state.enemies_in_sight.length) {
+      moves.strafe = 'Keep shooting while side-stepping, harder to hit.';
+      moves.hold = 'Stand your ground and fight from here.';
+    }
+    if (state.me.health < 0.5 || state.enemies_in_sight.length > 2) moves.fall_back = 'Fall back toward your own base.';
+    if (state.squad.leader_distance > 35) moves.join_squad = `Catch up with your squad (${state.squad.leader_distance} m away).`;
     // Only what is true now can be said.
     const callouts = { none: 'Say nothing.', on_my_way: 'Tell the team where you are heading.' };
     if (state.enemies_in_sight.length) callouts.enemies_spotted = 'Report the enemies you see.';
@@ -450,16 +577,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       ...(Object.keys(maneuver).length > 2 ? { maneuver: { type: 'choice', instructions: `You are ${sur?.driving ? 'driving' : 'on foot'} at ${sur?.speed} m/s and something is in the way. What do you do?`, criteria: maneuver } } : {}),
       ...(Object.keys(buy).length > 1 ? { buy: { type: 'choice', instructions: 'Do you buy something at the terminal now?', criteria: buy } } : {}),
       plan: { type: 'choice', instructions: 'Which of your plans fits the situation now?', criteria: plans },
-      move: {
-        type: 'choice',
-        instructions: 'How do you move right now?',
-        criteria: {
-          advance: `Go on with the plan: move toward ${objective?.name || 'the objective'}.`,
-          hold: 'Stand your ground and fight where you are.',
-          fall_back: 'Fall back toward your own base.',
-          regroup: 'Move to your nearest teammate.',
-        },
-      },
+      move: { type: 'choice', instructions: 'How do you move right now?', criteria: moves },
       target: { type: 'choice', instructions: 'Which target do you focus your fire on?', criteria: target },
       callout: { type: 'choice', instructions: 'Do you tell your team something now?', criteria: callouts },
       rethink: { type: 'noul', instructions: 'Has something happened that none of your plans covers?' },
@@ -469,8 +587,14 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     return questions;
   }
 
-  function objectiveOf(plan, me) {
+  function objectiveOf(plan, me, bb) {
     if (!plan) return null;
+    // A flank: by the side point first.
+    if (plan.via && bb && !(bb.viaDone ??= {})[plan.id]) {
+      if (dist(me.pos, plan.via) < 20) bb.viaDone[plan.id] = true;
+      else return { name: 'the flank', pos: plan.via, distance: dist(me.pos, plan.via) };
+    }
+    if (plan.pos) return { name: plan.text, pos: plan.pos, distance: dist(me.pos, plan.pos) };
     if (plan.building) {
       const b = world.buildings.find((x) => x.id === plan.building);
       if (b) return { name: `${b.team === me.team ? 'our' : 'the enemy'} ${buildingName(b)}`, pos: b.pos, building: b.id, enemy: b.team !== me.team, distance: dist(me.pos, b.pos) };
@@ -500,12 +624,27 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     let to = null;
     if (move === 'advance' && objective) to = objective.pos;
     if (move === 'fall_back') to = places.find((p) => p.base && p.team === me.team)?.pos;
-    if (move === 'regroup') {
-      const mate = world.players.filter((p) => p.team === me.team && p.id !== me.id && p.alive).sort((a, b) => dist(me.pos, a.pos) - dist(me.pos, b.pos))[0];
-      to = mate?.pos;
+    if (move === 'join_squad') to = bb.leader;
+    if (move === 'leave_tiberium' && Date.now() - (bb.lastLeave || 0) > 2000) {
+      bb.lastLeave = Date.now();
+      bb.goTo = null;
+      send(`bot_do ${bot.id} leave_tiberium`);
+      return;
     }
-    bb.walkingTo = move !== 'hold' && to && bot.waypoint < bot.path;
-    if (move === 'hold' || !to) cmd('move', 'stop');
+    if (move === 'strafe' && Date.now() - (bb.lastStrafe || 0) > 1500) {
+      bb.lastStrafe = Date.now();
+      bb.strafeSide = !bb.strafeSide;
+      send(`bot_do ${bot.id} maneuver ${bb.strafeSide ? 'strafe_left' : 'strafe_right'}`);
+    }
+    // Squad spacing: members spread around the objective, not on one spot.
+    if (to && move === 'advance' && bb.org?.slot) {
+      const k = bb.org.slot, a = (k * 2.4) % (2 * Math.PI);
+      to = [to[0] + 6 * Math.cos(a), to[1] + 6 * Math.sin(a), to[2]];
+    }
+    bb.walkingTo = move === 'advance' && to && bot.waypoint < bot.path;
+    if (move === 'hold' || move === 'strafe' || !to) {
+      if (move !== 'strafe') cmd('move', 'stop');
+    }
     else {
       // Re-send only for a new destination (5 m), or when the walk ended.
       const last = bb.goTo;
@@ -587,7 +726,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const answer = await planner(state, bb.persona, bb.notes, why, { buildings: Object.keys(buildings), places: placeNames });
     if (!answer || !bots.has(id)) {
       bb.nextPlan = Date.now() + 5000; // the model was busy or slow: try again soon
-      return usePlans(bb, scriptedPlan(state), state, Date.now(), 'scripted');
+      return usePlans(bb, scriptedPlan(state, bb.org), state, Date.now(), 'scripted');
     }
     const plans = (Array.isArray(answer.plans) ? answer.plans : []).slice(0, 4).map((p, i) => {
       const plan = { id: String(p.id || `plan${i}`).replace(/[^\w]/g, '_').slice(0, 24) || `plan${i}`, text: cleanSay(p.text) || 'keep fighting' };
@@ -603,7 +742,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     });
     const seen = new Set();
     const unique = plans.filter((p) => !seen.has(p.id) && seen.add(p.id));
-    usePlans(bb, { plans: unique.length ? unique : scriptedPlan(state).plans, orders: (answer.orders || []).slice(0, 3).map(cleanSay) }, state, Date.now(), 'model');
+    usePlans(bb, { plans: unique.length ? unique : scriptedPlan(state, bb.org).plans, orders: (answer.orders || []).slice(0, 3).map(cleanSay) }, state, Date.now(), 'model');
     if (answer.note) bb.notes = [...bb.notes, cleanSay(answer.note)].slice(-5);
     const say = cleanSay(answer.say);
     const now = Date.now();
@@ -638,7 +777,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const state = view(bot, me);
     // Planner: on spawn, on rethink, or every ~25 s. The scripted plans stand
     // in until the model's arrive (and whenever it fails).
-    if (!bb.plans.length) usePlans(bb, scriptedPlan(state), state, now, 'scripted');
+    if (!bb.plans.length) usePlans(bb, scriptedPlan(state, bb.org), state, now, 'scripted');
     if (!wasAlive) bb.why = 'you just (re)spawned';
     if ((!wasAlive || bb.wantPlan || now >= bb.nextPlan) && !bb.planning) {
       bb.nextPlan = now + 22000 + Math.random() * 6000;
@@ -648,10 +787,10 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       if (planner && withinBudget()) {
         bb.planning = true;
         planWithModel(bot.id, bb, state, why).finally(() => (bb.planning = false));
-      } else usePlans(bb, scriptedPlan(state), state, now, 'scripted');
+      } else usePlans(bb, scriptedPlan(state, bb.org), state, now, 'scripted');
     }
     const plan = bb.plans.find((p) => p.id === bb.current) || bb.plans[0];
-    const objective = objectiveOf(plan, me);
+    const objective = objectiveOf(plan, me, bb);
     const questions = questionsFor(state, bb, objective);
     const { world: _w, ...decisionState } = state;
     const t0 = Date.now();
@@ -666,7 +805,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       bb.wantPlan = true;
       bb.why = 'your reflexes say something happened that your plans do not cover';
     }
-    act(bot, me, state, bb, answers, objectiveOf(bb.plans.find((p) => p.id === answers.plan?.choice) || plan, me));
+    act(bot, me, state, bb, answers, objectiveOf(bb.plans.find((p) => p.id === answers.plan?.choice) || plan, me, bb));
     rec('decision', { bot: me.name, team: me.team, by, ms, state: modelState, questions, answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.probabilities ?? a.probability])) });
   }
 
@@ -690,7 +829,10 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
         .catch((e) => out(`[brain] ${me.name}: ${e.stack || e}`))
         .finally(() => (bb.busy = false));
     }
-    for (const id of bots.keys()) if (!players.has(id)) bots.delete(id);
+    for (const id of bots.keys()) if (!players.has(id)) {
+      bots.delete(id);
+      teams.leave(id);
+    }
   }
 
   out(`[brain] ${mode} brain for the bots`);

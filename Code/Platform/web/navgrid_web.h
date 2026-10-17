@@ -20,4 +20,8 @@ void Block(Kind kind, const Vector3 &p, float radius);
 // Writes a grid as a PGM image (top view, brighter = more links).
 bool Dump(Kind kind, const char *file);
 int Node_Count(Kind kind);
+// Standing on tiberium (it hurts soldiers)?
+bool On_Tiberium(const Vector3 &p);
+// The nearest walkable spot off tiberium (within 25 m).
+bool Off_Tiberium(const Vector3 &p, Vector3 &out);
 } // namespace NavGrid

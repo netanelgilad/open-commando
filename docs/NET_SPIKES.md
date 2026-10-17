@@ -628,3 +628,45 @@ into C&C_City with five bots; two players: four bots, 3 a side.
   `bot_do <id> maneuver ...` (a short detour, in reverse for vehicles, then
   a new path). Test: drivers covered 150-270 m at 7-9 m/s (before: ~40 m
   and stuck).
+
+## S20: bots less bot-like; smooth movement of others
+
+From the record of a 32-player game (you + 31 bots, C&C_Complex): each
+team was one blob (the biggest group 63% of the team), bots stood still
+38% of the time, 38 of 43 deaths were in the middle (the tiberium field;
+13 kills only). Causes, from the record: the scripted plans (the fallback
+until a model's arrive, 239 of 429) gave every bot of a team the same
+target; Clef picked "regroup" (move to the nearest teammate) in half of
+its decisions and "hold" in a fifth; nothing knew tiberium hurts.
+- Roles and squads (bot-brain.mjs, createTeams): a role per bot,
+  balanced per team (assault 35%, flanker 20%, defender 15%, hunter 15%,
+  support 15%), squads of 1-3; each squad its own objective, spread over
+  the enemy buildings (flankers by a point 60 m off the line between the
+  bases, alternating sides; hunters the harvester or the field; defenders
+  a building each); squad members spread around the objective. The
+  planner prompt has the role, squad and its objective.
+- Clef's moves: no "regroup" (instead "catch up with your squad", only
+  past 35 m from its leader), "hold" and a new "strafe" (side-steps while
+  shooting) only with enemies in sight, "get off the tiberium" when on it.
+- Tiberium: the walking grid marks nodes on tiberium surfaces (a meter of
+  field costs like 9 m of path for soldiers; vehicles don't mind), route
+  shortcuts don't cross a field, foot destinations in a field move to the
+  nearest safe ground, `bot_do <id> leave_tiberium`, and the state says
+  when a bot stands in it.
+- Same map, same size, after: biggest group 42-54% of a team, 4.7-6
+  groups a team (was 4), still 16-20% of the time (was 38%), time on
+  tiberium 7% of decisions (was 14% before the shortcut fix), kills 32-44
+  (was 13).
+- Smoothing: other soldiers were snapped to every server position with
+  zero velocity (Phys3Class::Network_State_Update) while the client also
+  moved them by their controls: a jump at almost every update. Now the
+  correction is blended in over 150 ms (the engine's own latency
+  correction, until now only for your soldier), popping past 2.5 m.
+  Measured live (163-239 ms ping): 58 visible jumps (> 0.25 m in a frame)
+  in 40 s with smoothing off, 1 with it on. `net_smoothing on|off`; the
+  overlay shows corrections and jumps.
+- Also seen: each other soldier gets an update only a few times a second
+  (the server's per-object priority, not the 20 Hz rate); far soldiers
+  drift between updates. Next for movement: an interpolation buffer for
+  remote soldiers (render them ~100 ms in the past between two updates),
+  and hit checks against where targets were when the shot was fired.

@@ -19,6 +19,7 @@
 #include "castres.h"
 #include "doors.h"
 #include "obbox.h"
+#include "w3d_file.h"
 
 #include <emscripten.h>
 #include <algorithm>
@@ -36,8 +37,14 @@ const int DY[8] = {0, 1, 1, 1, 0, -1, -1, -1};
 
 struct Node {
   Vector3 pos;
-  int links[10]; // 8 neighbors (DX/DY order), then door links
+  int links[10];       // 8 neighbors (DX/DY order), then door links
+  bool hazard = false; // tiberium: hurts soldiers
 };
+
+bool Is_Tiberium(uint32 surface) {
+  return surface == SURFACE_TYPE_TIBERIUM_FIELD || surface == SURFACE_TYPE_TIBERIUM_WATER ||
+         surface == SURFACE_TYPE_TIBERIUM_WATER_PERMEABLE || surface == SURFACE_TYPE_UNDERWATER_TIBERIUM_DIRT;
+}
 
 // Doors are static (animated) objects: the floor under them is probed with
 // them out of the way; for soldiers, links don't pass them and each door
@@ -62,6 +69,7 @@ struct Grid {
   float STEP;     // obstacles lower than this are stepped (driven) over
   float HALF;     // half the width of the walker's box
   bool doors;     // door nodes (soldiers)
+  float HAZARD;   // extra cost of a tiberium node (soldiers; vehicles don't mind)
 
   std::string Level; // what the grid was built for (map, scene)
   Vector3 Min, Max;  // level extents
@@ -77,8 +85,8 @@ struct Grid {
   int Row = 0, Links = 0;
   double BuildStarted = 0, BuildMs = 0;
 
-  Grid(const char *n, float cell, float headroom, float max_rise, float step, float half, bool with_doors)
-      : name(n), CELL(cell), HEADROOM(headroom), MAX_RISE(max_rise), STEP(step), HALF(half), doors(with_doors) {}
+  Grid(const char *n, float cell, float headroom, float max_rise, float step, float half, bool with_doors, float hazard)
+      : name(n), CELL(cell), HEADROOM(headroom), MAX_RISE(max_rise), STEP(step), HALF(half), doors(with_doors), HAZARD(hazard) {}
 
   bool Ready(void) const { return Building == PHASE_READY && !Nodes.empty(); }
   int Cell_Of(float x, float y, int *ix = nullptr, int *iy = nullptr) const {
@@ -121,6 +129,7 @@ struct Grid {
       if (res.Normal.Z > 0.7f && ceiling - hit >= HEADROOM && (int)out.size() < MAX_LAYERS) {
         Node n;
         n.pos.Set(x, y, hit);
+        n.hazard = Is_Tiberium(res.SurfaceType);
         for (int &l : n.links)
           l = -1;
         out.push_back(n);
@@ -231,8 +240,11 @@ struct Grid {
         int door_nodes = doors ? Add_Door_Links() : 0;
         Penalty.assign(Nodes.size(), 0.0f);
         Building = PHASE_READY;
-        fprintf(stderr, "[nav] %s, %s grid (%s): %dx%d cells, %d nodes, %d links, %d doors (%.0f ms of work over %.1f s)\n",
-                The_Game()->Get_Map_Name().Peek_Buffer(), name, Level.c_str(), NX, NY, (int)Nodes.size(), Links, door_nodes,
+        int tiberium = 0;
+      for (const Node &n : Nodes)
+        tiberium += n.hazard;
+      fprintf(stderr, "[nav] %s, %s grid (%s): %dx%d cells, %d nodes (%d on tiberium), %d links, %d doors (%.0f ms of work over %.1f s)\n",
+                The_Game()->Get_Map_Name().Peek_Buffer(), name, Level.c_str(), NX, NY, (int)Nodes.size(), tiberium, Links, door_nodes,
                 BuildMs + emscripten_get_now() - t0,
                 (emscripten_get_now() - BuildStarted) / 1000.0);
       }
@@ -275,8 +287,22 @@ struct Grid {
     for (size_t k = ia + 1; k < ib; k++) {
       const Vector3 &p = Nodes[route[k]].pos;
       float t = (float)(k - ia) / (float)(ib - ia);
-      if (fabsf(p.Z - (pa.Z + (pb.Z - pa.Z) * t)) > STEP + 0.05f)
+      if ((HAZARD > 0 && Nodes[route[k]].hazard) || fabsf(p.Z - (pa.Z + (pb.Z - pa.Z) * t)) > STEP + 0.05f)
         return false;
+    }
+    // Not across tiberium: the ground under the whole line, a cell at a time.
+    if (HAZARD > 0) {
+      Vector3 d = pb - pa;
+      int steps = (int)(d.Length() / CELL);
+      for (int k = 1; k < steps; k++) {
+        Vector3 q = pa + d * ((float)k / steps);
+        int c = Cell_Of(q.X, q.Y);
+        if (c < 0)
+          continue;
+        for (int n = CellStart[c]; n < CellStart[c + 1]; n++)
+          if (Nodes[n].hazard && fabsf(Nodes[n].pos.Z - q.Z) < 1.5f)
+            return false;
+      }
     }
     return Sweep(pa, pb);
   }
@@ -309,7 +335,7 @@ struct Grid {
       for (int l : Nodes[n].links) {
         if (l < 0)
           continue;
-        float c = cost[n] + (Nodes[l].pos - Nodes[n].pos).Length() + Penalty[l];
+        float c = cost[n] + (Nodes[l].pos - Nodes[n].pos).Length() + Penalty[l] + (Nodes[l].hazard ? HAZARD : 0.0f);
         if (c < cost[l]) {
           cost[l] = c;
           came[l] = n;
@@ -416,8 +442,9 @@ struct Grid {
   }
 };
 
-Grid Soldiers("soldier", 1.0f, 1.9f, 0.7f, 0.55f, 0.3f, true);
-Grid Vehicles("vehicle", 2.0f, 3.0f, 1.2f, 0.8f, 1.5f, false);
+// Soldiers walk around tiberium: a meter of field costs like 9 m of path.
+Grid Soldiers("soldier", 1.0f, 1.9f, 0.7f, 0.55f, 0.3f, true, 8.0f);
+Grid Vehicles("vehicle", 2.0f, 3.0f, 1.2f, 0.8f, 1.5f, false, 0.0f);
 Grid &For(Kind k) { return k == VEHICLE ? Vehicles : Soldiers; }
 
 } // namespace
@@ -441,6 +468,33 @@ bool Ensure(void) {
   if (Soldiers.Ready())
     Vehicles.Step(key, 3.0);
   return Soldiers.Ready();
+}
+
+bool On_Tiberium(const Vector3 &p) {
+  if (!Soldiers.Ready())
+    return false;
+  int n = Soldiers.Nearest(p);
+  return n >= 0 && Soldiers.Nodes[n].hazard && (Soldiers.Nodes[n].pos - p).Length() < 2.0f;
+}
+
+bool Off_Tiberium(const Vector3 &p, Vector3 &out) {
+  Grid &g = Soldiers;
+  if (!g.Ready())
+    return false;
+  int ci, cj;
+  g.Cell_Of(p.X, p.Y, &ci, &cj);
+  for (int r = 1; r <= 25; r++)
+    for (int j = cj - r; j <= cj + r; j++)
+      for (int i = ci - r; i <= ci + r; i++) {
+        if (i < 0 || j < 0 || i >= g.NX || j >= g.NY || (abs(i - ci) != r && abs(j - cj) != r))
+          continue;
+        for (int n = g.CellStart[j * g.NX + i]; n < g.CellStart[j * g.NX + i + 1]; n++)
+          if (!g.Nodes[n].hazard && fabsf(g.Nodes[n].pos.Z - p.Z) < 2.0f) {
+            out = g.Nodes[n].pos;
+            return true;
+          }
+      }
+  return false;
 }
 
 int Node_Count(Kind k) { return For(k).Ready() ? (int)For(k).Nodes.size() : 0; }
