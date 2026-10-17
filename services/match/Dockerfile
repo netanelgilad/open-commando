@@ -9,7 +9,7 @@ COPY tools/server/package.json tools/server/package-lock.json tools/server/
 RUN cd tools/server && npm ci --omit=dev
 COPY bin/ bin/
 COPY web/net.js web/
-COPY tools/server/run-server.mjs tools/server/bot-brain.mjs tools/server/
+COPY tools/server/*.mjs tools/server/
 COPY srv/ /srv/
 ENV REBEL_STATUS_PORT=8080
 EXPOSE 8080

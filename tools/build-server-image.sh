@@ -13,7 +13,7 @@ rm -rf "$out"
 mkdir -p "$out/bin" "$out/web" "$out/tools/server" "$out/srv/renegade/Data"
 cp build/wasm-release/bin/renegade.js build/wasm-release/bin/renegade.wasm "$out/bin/"
 cp web/net.js "$out/web/"
-cp tools/server/run-server.mjs tools/server/bot-brain.mjs tools/server/package.json tools/server/package-lock.json "$out/tools/server/"
+cp tools/server/*.mjs tools/server/package.json tools/server/package-lock.json "$out/tools/server/"
 cp services/match/Dockerfile "$out/"
 # The game: the files the browser imports (root config + Data), minus movies
 # and the single-player missions (M01-M13.mix): a match server needs neither.

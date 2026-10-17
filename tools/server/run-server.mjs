@@ -176,15 +176,11 @@ if (opt['status-port']) {
 net.log = (t) => out(`[net] ${t}`);
 await net.ready;
 
-if (opt['bot-brain'] !== 'off') try {
-  // A brain that can't load leaves the bots on their own goal loop; the match
-  // goes on either way.
+if (opt['bot-brain'] !== 'off') {
   const { createBrain } = await import('./bot-brain.mjs');
   const ai = process.env.REBEL_AI_URL && { url: process.env.REBEL_AI_URL, key: process.env.REBEL_AI_KEY };
   const budgetUsd = +(process.env.REBEL_AI_BUDGET_USD || 2); // per server (one match)
   brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out, ai, budgetUsd });
-} catch (e) {
-  out(`[brain] not loaded (${e.message}): bots play on their own`);
 }
 
 globalThis.rebelNodeModule = {
