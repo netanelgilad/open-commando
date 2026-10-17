@@ -18,6 +18,7 @@ import { pass } from './matchmaker.js';
 import { lobbyTick } from './lobby.js';
 import { LOBBY_MAP, pickMatchMap } from './maps.js';
 import { REGIONS } from './regions.js';
+import { aiKey } from './ai.js';
 
 const MATCH_MINUTES = 30;
 
@@ -127,11 +128,17 @@ export class Matchmaker extends DurableObject {
   // after a deploy, while the container rolls out.
   startServer(match, now) {
     match.lastStartAt = now;
-    this.ctx.waitUntil(
-      this.server(match.id)
-        .start({ envVars: { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: match.matchMap } })
-        .catch((err) => console.log(`start ${match.id}: ${err}`)),
-    );
+    const start = async () => {
+      const envVars = { REBEL_NET: `${this.env.PUBLIC_WSS}/room/${match.id}`, REBEL_MAP: LOBBY_MAP, REBEL_NEXT_MAP: match.matchMap };
+      if (this.env.BOT_BRAIN && this.env.BOT_BRAIN !== 'off') {
+        // The bots' brain calls the models through /ai/<match> (ai.js).
+        envVars.REBEL_BOT_BRAIN = this.env.BOT_BRAIN;
+        envVars.REBEL_AI_URL = `${this.env.PUBLIC_WSS.replace(/^wss:/, 'https:')}/ai/${match.id}`;
+        envVars.REBEL_AI_KEY = await aiKey(this.env.START_TOKEN, match.id);
+      }
+      await this.server(match.id).start({ envVars });
+    };
+    this.ctx.waitUntil(start().catch((err) => console.log(`start ${match.id}: ${err}`)));
   }
 
   // A match whose server never came up (no capacity, a broken start): the

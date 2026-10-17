@@ -30,7 +30,8 @@ const engine = resolve(here, '../..');
 const { values: opt } = parseArgs({
   options: {
     net: { type: 'string', default: process.env.REBEL_NET },
-    // Bots' brain (bot-brain.mjs): off (the engine's own goal loop) or scripted.
+    // Bots' brain (bot-brain.mjs): off (the engine's own goal loop), scripted, or
+    // clef (decisions by Clef-flash via REBEL_AI_URL with REBEL_AI_KEY).
     'bot-brain': { type: 'string', default: process.env.REBEL_BOT_BRAIN || 'off' },
     'bot-log': { type: 'string', default: process.env.REBEL_BOT_LOG }, // every decision, as JSON lines
     game: { type: 'string', default: process.env.REBEL_GAME_DIR || resolve(engine, '../game-data/renegade') },
@@ -176,7 +177,8 @@ await net.ready;
 
 if (opt['bot-brain'] !== 'off') {
   const { createBrain } = await import('./bot-brain.mjs');
-  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out });
+  const ai = process.env.REBEL_AI_URL && { url: process.env.REBEL_AI_URL, key: process.env.REBEL_AI_KEY };
+  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), log: opt['bot-log'], out, ai });
 }
 
 globalThis.rebelNodeModule = {

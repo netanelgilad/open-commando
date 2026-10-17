@@ -111,20 +111,63 @@ function scriptedDecide(state, questions) {
   return answers;
 }
 
+// --- Clef-flash (Workers AI, through the match service's /ai/<match>) -------
+// A call that fails or takes too long gets the scripted answers instead, so a
+// bot never waits on the model.
+const CLEF_TIMEOUT_MS = 1500;
+function clefDecider(ai, stats) {
+  return async (state, questions) => {
+    const t0 = Date.now();
+    try {
+      const res = await fetch(ai.url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${ai.key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'clef-flash', input: { state, questions } }),
+        signal: AbortSignal.timeout(CLEF_TIMEOUT_MS),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.output?.answers) throw new Error(body.error || `HTTP ${res.status}`);
+      stats.calls++;
+      stats.ms.push(Date.now() - t0);
+      stats.tokens += body.output.usage?.input_tokens || 0;
+      const answers = {};
+      for (const [id, a] of Object.entries(body.output.answers)) {
+        answers[id] = a.type === 'noul' ? { probability: a.noul } : { choice: a.choice, probabilities: a.probabilities, confidence: a.confidence };
+      }
+      return answers;
+    } catch (e) {
+      stats.failed++;
+      stats.lastError = String(e.message || e);
+      return null;
+    }
+  };
+}
+
 const CALLOUTS = {
-  enemies_spotted: (s) => `${s.enemies_in_sight.length} enemies ${s.me.place}`,
+  enemies_spotted: (s) => (s.enemies_in_sight.length === 1 ? `Enemy ${s.enemies_in_sight[0].kind} ${s.enemies_in_sight[0].place}` : `${s.enemies_in_sight.length} enemies ${s.me.place}`),
   need_help: (s) => `Need help ${s.me.place}!`,
   base_under_attack: (s) => `${s.alerts.find((a) => a.kind === 'base_under_attack')?.what} under attack!`,
   on_my_way: (s) => `On my way to ${s.blackboard.planText}`,
 };
 
-export function createBrain({ mode = 'scripted', send, log, out = console.log }) {
+export function createBrain({ mode = 'scripted', send, log, out = console.log, ai = null }) {
   let world = null;
   let places = [];
   let pending = false;
   const chat = []; // {t, from, team, text, to: 'all'|team}
   const bots = new Map(); // id -> blackboard and memory
   const record = (entry) => log && appendFileSync(log, JSON.stringify(entry) + '\n');
+  const stats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null };
+  const model = mode === 'clef' && ai?.url ? clefDecider(ai, stats) : null;
+  if (mode === 'clef' && !model) out('[brain] clef: no REBEL_AI_URL/REBEL_AI_KEY, deciding scripted');
+  if (model) {
+    setInterval(() => {
+      const ms = stats.ms.splice(0).sort((a, b) => a - b);
+      const q = (f) => ms[Math.min(ms.length - 1, Math.floor(ms.length * f))] ?? 0;
+      out(`[brain] clef: ${stats.calls} calls, ${stats.failed} failed${stats.lastError ? ` (${stats.lastError})` : ''}, ${stats.tokens} tokens; latency p50 ${q(0.5)} ms, p90 ${q(0.9)} ms`);
+      stats.lastError = null;
+    }, 30000).unref();
+  }
 
   function blackboard(id) {
     let b = bots.get(id);
@@ -165,12 +208,17 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log })
 
   // The moment's questions, in the decision model's format: every option is
   // something the bot can do right now.
-  function questionsFor(state, bb, objective) {
+  function questionsFor(state, bb, objective, all = false) {
     const plans = Object.fromEntries(bb.plans.map((p) => [p.id, p.text]));
     const target = { none: 'Shoot at nothing right now.' };
     for (const e of state.enemies_in_sight) target[`enemy_${e.id}`] = `Shoot the ${e.kind}${e.name ? ` (${e.name})` : ''}, ${e.distance} m away, health ${pct(e.health)}.`;
     if (objective?.building && objective.distance < 45 && objective.enemy) target.building = `Shoot the enemy ${objective.name}.`;
-    return {
+    // Only what is true now can be said.
+    const callouts = { none: 'Say nothing.', on_my_way: 'Tell the team where you are heading.' };
+    if (state.enemies_in_sight.length) callouts.enemies_spotted = 'Report the enemies you see.';
+    if (state.enemies_in_sight.length && state.me.health < 0.6) callouts.need_help = 'Ask for help.';
+    if (state.alerts.length) callouts.base_under_attack = 'Warn that our base is under attack.';
+    const questions = {
       plan: { type: 'choice', instructions: 'Which of your plans fits the situation now?', criteria: plans },
       move: {
         type: 'choice',
@@ -183,13 +231,12 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log })
         },
       },
       target: { type: 'choice', instructions: 'What do you shoot at?', criteria: target },
-      callout: {
-        type: 'choice',
-        instructions: 'Do you tell your team something now?',
-        criteria: { none: 'Say nothing.', enemies_spotted: 'Report the enemies you see.', need_help: 'Ask for help.', base_under_attack: 'Warn that our base is under attack.', on_my_way: 'Tell the team where you are heading.' },
-      },
+      callout: { type: 'choice', instructions: 'Do you tell your team something now?', criteria: callouts },
       rethink: { type: 'noul', instructions: 'Has something happened that none of your plans covers?' },
     };
+    // A choice needs two options at least (nothing in sight: no target question).
+    if (!all) for (const [id, q] of Object.entries(questions)) if (q.type === 'choice' && Object.keys(q.criteria).length < 2) delete questions[id];
+    return questions;
   }
 
   function objectiveOf(plan, me) {
@@ -273,14 +320,19 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log })
     const questions = questionsFor(state, bb, objective);
     const { world: _w, ...decisionState } = state;
     const t0 = Date.now();
-    const answers = scriptedDecide(state, questions);
+    const modelState = JSON.parse(JSON.stringify(decisionState, (k, v) => (k === 'pos' || k === 'id' ? undefined : v)));
+    const decided = model ? await model(modelState, questions) : null;
+    const by = decided ? 'clef' : 'scripted';
+    // Questions left out (one option) default to the scripted answer.
+    const answers = { ...scriptedDecide(state, questionsFor(state, bb, objective, true)), ...decided };
     const ms = Date.now() - t0;
+    if (!bb.alive?.()) return; // the world moved on (bot gone)
     if ((answers.rethink?.probability || 0) > 0.7) bb.wantPlan = true;
     act(bot, me, state, bb, answers, objectiveOf(bb.plans.find((p) => p.id === answers.plan?.choice) || plan, me));
-    record({ t: now, bot: me.name, ms, state: decisionState, questions: Object.fromEntries(Object.entries(questions).map(([k, q]) => [k, Object.keys(q.criteria || { yes: 1 })])), answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.choice ?? a.probability])) });
+    record({ t: now, bot: me.name, by, ms, state: modelState, questions: Object.fromEntries(Object.entries(questions).map(([k, q]) => [k, Object.keys(q.criteria || { yes: 1 })])), answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.probabilities ?? a.probability])) });
   }
 
-  async function tick() {
+  function tick() {
     pending = false;
     if (!world) return;
     const now = Date.now();
@@ -289,13 +341,14 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log })
     for (const bot of world.bots) {
       const me = players.get(bot.id);
       const bb = blackboard(bot.id);
-      if (!me || now < bb.nextDecide) continue;
+      if (!me || now < bb.nextDecide || bb.busy) continue;
       bb.nextDecide = now + DECIDE_MS[0] + Math.random() * (DECIDE_MS[1] - DECIDE_MS[0]);
-      try {
-        await think(bot, me, now);
-      } catch (e) {
-        out(`[brain] ${me.name}: ${e.stack || e}`);
-      }
+      bb.busy = true;
+      bb.alive = () => bots.get(bot.id) === bb;
+      // Bots think in parallel; each waits only for its own decision.
+      think(bot, me, now)
+        .catch((e) => out(`[brain] ${me.name}: ${e.stack || e}`))
+        .finally(() => (bb.busy = false));
     }
     for (const id of bots.keys()) if (!players.has(id)) bots.delete(id);
   }

@@ -72,8 +72,11 @@
     "START_PLAYERS": "4",
     "MIN_PLAYERS": "1",
     "LOBBY_WAIT_S": "60",
-    "BOT_FILL": "6"
+    "BOT_FILL": "6",
+    // The bots' brain on match servers: off, scripted, clef (tools/server/bot-brain.mjs).
+    "BOT_BRAIN": "off"
   },
+  "ai": { "binding": "AI" },
   "observability": { "enabled": true },
   "workers_dev": true
 }

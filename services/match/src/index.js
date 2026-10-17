@@ -9,6 +9,8 @@
 //   GET  /presence                 WebSocket held open by a front screen (counts visitors)
 //   GET  /room/<id>                WebSocket: join match room <id> (web/net.js frames)
 //   POST /match/<id>/start|stop    start/stop a match server by hand (START_TOKEN)
+//   POST /ai/<id>                  the bots' models for match <id> (Workers AI), for its
+//                                  server: {model, input} with the match's key (aiKey)
 //   GET  /match/<id>               a match server's status
 //
 // Regions are Cloudflare's container placement regions. A match id carries
@@ -20,6 +22,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Room } from '../../hub/src/index.js';
 import { Matchmaker } from './matchmaker-do.js';
 import { REGIONS, regionOf } from './regions.js';
+import { aiKey, AI_MODELS } from './ai.js';
 
 export { Room, Matchmaker };
 
@@ -132,6 +135,20 @@ export default {
     if (url.pathname === '/status') {
       const all = await Promise.all(Object.keys(REGIONS).map((r) => matchmaker(env, r).fetch(new Request(`${url.origin}/status?region=${r}`)).then((res) => res.json()).catch(() => null)));
       return json({ regions: Object.keys(REGIONS), queue: all.flatMap((s) => s?.queue || []), matches: all.flatMap((s) => s?.matches || []) });
+    }
+    const ai = /^\/ai\/([\w-]{1,64})$/.exec(url.pathname);
+    if (ai) {
+      if (request.method !== 'POST') return new Response('POST expected', { status: 405 });
+      if (!env.START_TOKEN || request.headers.get('Authorization') !== `Bearer ${await aiKey(env.START_TOKEN, ai[1])}`) return new Response('forbidden', { status: 403 });
+      const { model, input } = await request.json().catch(() => ({}));
+      if (!AI_MODELS[model] || !input) return new Response('bad request', { status: 400 });
+      const t0 = Date.now();
+      try {
+        const output = await env.AI.run(AI_MODELS[model], input);
+        return json({ ms: Date.now() - t0, output });
+      } catch (e) {
+        return json({ ms: Date.now() - t0, error: String(e) }, 502);
+      }
     }
     const room = /^\/room\/([\w-]{1,64})$/.exec(url.pathname);
     if (room) {
