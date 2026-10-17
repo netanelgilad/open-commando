@@ -91,7 +91,7 @@ Port = ${opt.port}
 GameSpyGamePort = 0
 GameSpyQueryPort = 0
 BandwidthUp = 0
-NetUpdateRate = 10
+NetUpdateRate = 20
 AllowRemoteAdmin = false
 `);
 writeFileSync(join(game, 'Data', 'svrcfg_open.ini'), `[Settings]

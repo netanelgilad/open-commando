@@ -142,7 +142,14 @@ PacketManagerClass::PacketManagerClass() {
   NumReceivePackets = 0;
   CurrentPacket = 0;
   LastSendTime = 0;
+#ifdef REBEL_PORTABLE
+  // Every frame: holding packets back to send 10 times a second (a 2002
+  // bandwidth saving) added up to 100 ms each way, ~100 ms to every ping.
+  // Packets are still combined within a frame. Console: send_frequency <ms>.
+  FlushFrequency = 0;
+#else
   FlushFrequency = 1000 / 10; // Default = 10 times per second.
+#endif
   AllowDeltas = true;
   AllowCombos = true;
   StatsFrequency = 10 * 1000;
