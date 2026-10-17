@@ -14,7 +14,7 @@
       "name": "open-commando-match-matchserver", // the application from before regions
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
-      "instance_type": "basic",
+      "instance_type": "standard-1",
       "max_instances": 5,
       "constraints": { "regions": ["WEUR"] }
     },
@@ -22,7 +22,7 @@
       "class_name": "MatchServerEEUR",
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
-      "instance_type": "basic",
+      "instance_type": "standard-1",
       "max_instances": 5,
       "constraints": { "regions": ["EEUR"] }
     },
@@ -30,7 +30,7 @@
       "class_name": "MatchServerENAM",
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
-      "instance_type": "basic",
+      "instance_type": "standard-1",
       "max_instances": 5,
       "constraints": { "regions": ["ENAM"] }
     },
@@ -38,7 +38,7 @@
       "class_name": "MatchServerWNAM",
       "image": "../../build/match-image/Dockerfile",
       "image_build_context": "../../build/match-image",
-      "instance_type": "basic",
+      "instance_type": "standard-1",
       "max_instances": 5,
       "constraints": { "regions": ["WNAM"] }
     }

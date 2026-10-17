@@ -700,6 +700,16 @@ void Rebel_Bots_Think(void) {
     if (!cPlayerManager::Find_Player(Bots[i].id))
       Bots.erase(Bots.begin() + i);
   for (Bot &b : Bots) {
+    // A bot's team is the player's: the server remixes teams at a map change.
+    if (cPlayer *p = cPlayerManager::Find_Player(b.id)) {
+      if (p->Get_Player_Type() != b.team) {
+        b.team = p->Get_Player_Type();
+        b.targetId = 0;
+        b.shootAt = false;
+        b.path.clear();
+        b.wp = 0;
+      }
+    }
     if (now < b.nextStep)
       continue;
     b.nextStep = now + 250;

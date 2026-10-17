@@ -453,6 +453,17 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
 
   async function think(bot, me, now) {
     const bb = blackboard(bot.id);
+    // Teams are remixed at a map change: new side, new plans.
+    if (bb.team && bb.team !== me.team) {
+      bb.plans = [];
+      bb.current = null;
+      bb.sent = {};
+      bb.goTo = null;
+      bb.notes = [];
+      bb.why = `teams were remixed: you are on ${me.team} now`;
+      bb.wantPlan = true;
+    }
+    bb.team = me.team;
     // Life events, from the scoreboard.
     if (bb.last) {
       if (me.deaths > bb.last.deaths) bb.events.push(`you died ${placeOf(places, bb.last.pos)}`), (bb.why = 'you just died');
@@ -524,7 +535,9 @@ export function createBrain({ mode = 'scripted', send, log, out = console.log, a
     // The models' spend so far (the page shows it during a match).
     usage: () => ({ usd: +spent().toFixed(4), budgetUsd, decisions: stats.calls, plans: planStats.calls, planners: planStats.by }),
     onState(json) {
+      const map = world?.map;
       world = JSON.parse(json);
+      if (map && world.map !== map) chat.length = 0; // a new map: the lobby's talk is over
       if (!pending) {
         pending = true;
         setImmediate(tick); // outside the game's frame
