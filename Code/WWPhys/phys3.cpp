@@ -1058,6 +1058,10 @@ void Phys3Class::Timestep(float dt) {
       */
       float frame_time = dt;
       float correction_time = _CorrectionTime;
+#ifdef REBEL_PORTABLE
+      if (RemoteSmoothing)
+        correction_time = _RemoteCorrectionTime;
+#endif
       float correction_fraction;
 
       if (correction_time <= frame_time) {
@@ -2271,6 +2275,22 @@ void Phys3Class::Network_Latency_State_Update(const Vector3 &net_pos, const Vect
   LastKnownPosition = net_pos;
   LastKnownVelocity = net_vel;
 }
+
+#ifdef REBEL_PORTABLE
+float Phys3Class::_RemoteCorrectionTime = 0.15f;
+Phys3Class::NetCorrectionStats Phys3Class::_NetStats = {0, 0, 0, 0, 0, 0};
+
+void Phys3Class::Network_Smooth_State_Update(const Vector3 &net_pos, const Vector3 &net_vel) {
+  if (History == NULL) {
+    History = new Phys3HistoryClass;
+    History->Init(net_pos, net_vel);
+  }
+  LatencyError = net_pos - State.Position;
+  LastKnownPosition = net_pos;
+  LastKnownVelocity = net_vel;
+  RemoteSmoothing = true;
+}
+#endif
 
 void Phys3Class::Network_Teleport_Correction(void) {
   Vector3 new_pos = LastKnownPosition;

@@ -224,10 +224,16 @@ try {
     for (const c of clients) await dump(c);
     if (host.proc && i % 4 === 0) host.proc.stdin.write('game_info\nplayer_info\n');
   }
-  // The ping the server measures for each client (ms), a few samples.
-  for (let i = 0; i < 4 && clients.some((c) => c.star); i++) {
+  // CLIENT_CMDS="a;b": console commands on the clients once they're in.
+  if (process.env.CLIENT_CMDS) for (const c of clients) for (const cmd of process.env.CLIENT_CMDS.split(';')) await c.page.evaluate((x) => setTimeout(() => Module.ccall('Rebel_Console_Command', null, ['string'], [x]), 0), cmd);
+  // The ping the server measures for each client (ms), and how far off other
+  // soldiers' positions were at each server update, a few samples.
+  for (let i = 0; i < (+process.env.NET_SAMPLES || 4) && clients.some((c) => c.star); i++) {
     await clients[0].page.waitForTimeout(5000);
-    for (const c of clients) console.log(`${stamp()} ${c.name} ping ${await c.page.evaluate(() => (Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1))} ms`);
+    for (const c of clients) {
+      const [ping, fix] = await c.page.evaluate(() => [Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1, Module._Rebel_Net_Corrections ? Module.UTF8ToString(Module._Rebel_Net_Corrections()) : '']);
+      console.log(`${stamp()} ${c.name} ping ${ping} ms corrections ${fix}`);
+    }
   }
   // Let textures and the spawn settle, then walk forward a little and check
   // the soldier moved.

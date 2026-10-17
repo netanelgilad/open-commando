@@ -46,6 +46,7 @@
 #include "combat.h"
 #include "gamedataupdateevent.h"
 #include "bots_web.h"
+void Rebel_Web_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list); // debug_web.cpp
 #include "datasafe.h"
 #include "pscene.h"
 #include "playermanager.h"
@@ -5041,6 +5042,7 @@ void ConsoleFunctionManager::Init(void) {
   // online lobby respawns you, and it gets you out of a stuck spot.
   FunctionList.Add(new SuicideConsoleFunctionClass());
   Rebel_Bots_Add_Commands(FunctionList);
+  Rebel_Web_Add_Commands(FunctionList);
   FunctionList.Add(new AdminMessageConsoleFunctionClass());
   FunctionList.Add(new GameInfoConsoleFunctionClass());
   FunctionList.Add(new KickConsoleFunctionClass());

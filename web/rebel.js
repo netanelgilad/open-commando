@@ -58,6 +58,9 @@ function startNetOverlay(net) {
     const ping = Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1;
     const loss = p.sent ? Math.round((1 - p.n / p.sent) * 100) : 0;
     netLine = `\nping ${ping >= 0 ? ping + ' ms' : '-'}  ·  relay ${p.median ?? '-'} ms (worst ${p.max ?? '-'})` + (loss ? `  ·  loss ${loss}%` : '');
+    // How far off others' positions were when the server's updates came.
+    const c = Module._Rebel_Net_Corrections ? JSON.parse(Module.UTF8ToString(Module._Rebel_Net_Corrections())) : null;
+    if (c?.updates) netLine += `\ncorrections ${c.avg.toFixed(2)} m avg (max ${c.max.toFixed(1)}), ${c.jumps} jumps of ${c.updates}${c.smoothing ? '' : ', smoothing off'}`;
   }, 2000);
 }
 // Online: what the bots' models have cost in this match so far, from the

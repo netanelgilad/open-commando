@@ -373,3 +373,31 @@ extern "C" int Rebel_My_Ping(void) {
   cPlayer *me = cPlayerManager::Find_Player(cNetwork::Get_My_Id());
   return me ? me->Get_Ping() : -1;
 }
+
+// Other soldiers' position corrections since the last call (soldier.cpp,
+// Phys3Class::_NetStats): how often and how far the client was off when a
+// server update came. JSON; read by the page's network overlay.
+#include "phys3.h"
+extern bool Rebel_Net_Smoothing;
+extern "C" const char *Rebel_Net_Corrections(void) {
+  static char buf[160];
+  Phys3Class::NetCorrectionStats &st = Phys3Class::_NetStats;
+  snprintf(buf, sizeof(buf), "{\"updates\":%d,\"avg\":%.2f,\"max\":%.2f,\"over1m\":%d,\"pops\":%d,\"jumps\":%d,\"smoothing\":%s}",
+           st.count, st.count ? st.sum / st.count : 0.0f, st.max, st.over1, st.overPop, st.jumps, Rebel_Net_Smoothing ? "true" : "false");
+  st = {0, 0, 0, 0, 0, 0};
+  return buf;
+}
+
+// net_smoothing on|off: blend other soldiers' corrections in (on) or jump to
+// the server's position as the original game did (off), for comparing.
+class NetSmoothingConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "net_smoothing"; }
+  const char *Get_Help(void) override { return "NET_SMOOTHING on|off - blend other soldiers' network corrections in."; }
+  void Activate(const char *input) override {
+    Rebel_Net_Smoothing = !(input && (strstr(input, "off") || strstr(input, "0")));
+    Print("network smoothing %s\n", Rebel_Net_Smoothing ? "on" : "off");
+  }
+};
+
+void Rebel_Web_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) { list.Add(new NetSmoothingConsoleFunctionClass()); }

@@ -138,6 +138,15 @@ public:
   void Network_State_Update(const Vector3 &pos, const Vector3 &vel);
 
   void Network_Latency_State_Update(const Vector3 &pos, const Vector3 &vel);
+#ifdef REBEL_PORTABLE
+  // Another player's soldier (not ours): fold the server's position in over
+  // _RemoteCorrectionTime instead of jumping to it (pops past _PopError).
+  void Network_Smooth_State_Update(const Vector3 &net_pos, const Vector3 &net_vel);
+  static float _RemoteCorrectionTime;
+  // How far off the client was at each server update (for measuring).
+  struct NetCorrectionStats { int count; float sum, max; int over1, overPop, jumps; }; // jumps: > 0.25 m in a frame
+  static NetCorrectionStats _NetStats;
+#endif
 
   static void Set_Correction_Time(float time) { _CorrectionTime = time; }
   static void Set_Allowable_Error(float err) { _AllowableError = err; }
@@ -240,6 +249,9 @@ protected:
 
   Phys3HistoryClass *History; // history of our state for smarter network updating
   Vector3 LatencyError;       // remaining latency error
+#ifdef REBEL_PORTABLE
+  bool RemoteSmoothing = false; // corrections come from Network_Smooth_State_Update
+#endif
   Vector3 LastKnownPosition;  // last position received from server
   Vector3 LastKnownVelocity;  // last velocity received from server
 

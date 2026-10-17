@@ -1347,6 +1347,9 @@ int SoldierGameObj::Check(void) {
 **
 */
 bool _UseLatencyInterpret = true;
+#ifdef REBEL_PORTABLE
+bool Rebel_Net_Smoothing = true; // other soldiers' corrections blended in (console: net_smoothing)
+#endif
 
 //-----------------------------------------------------------------------------
 void SoldierGameObj::Interpret_Sc_Position_Data(const Vector3 &sc_position) {
@@ -1377,6 +1380,24 @@ void SoldierGameObj::Interpret_Sc_Position_Data(const Vector3 &sc_position) {
     }
 
     //		Set_Position(sc_position);
+#ifdef REBEL_PORTABLE
+    // Measure how far off we were, then (net_smoothing on) blend in.
+    Phys3Class::NetCorrectionStats &st = Phys3Class::_NetStats;
+    float err = pos_error.Length();
+    st.count++;
+    st.sum += err;
+    st.max = err > st.max ? err : st.max;
+    st.over1 += err > 1.0f;
+    st.overPop += err > 2.5f;
+    // Visible jumps: snapping moves it by the whole error in one frame;
+    // blending moves it by at most about an eighth of it a frame (pops past
+    // 2.5 m are jumps either way).
+    st.jumps += Rebel_Net_Smoothing ? (err > 2.5f || err * 0.125f > 0.25f) : err > 0.25f;
+    if (Rebel_Net_Smoothing) {
+      Peek_Human_Phys()->Network_Smooth_State_Update(position, Vector3(0, 0, 0));
+      return;
+    }
+#endif
     Peek_Human_Phys()->Network_State_Update(position, Vector3(0, 0, 0));
   }
 }
