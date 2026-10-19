@@ -27,6 +27,7 @@
 #include "playertype.h"
 #include "wwmath.h"
 #include "navgrid_web.h"
+#include "weapons.h"
 #include "vendor.h"
 #include "purchasesettings.h"
 #include "basecontroller.h"
@@ -249,6 +250,12 @@ void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
     b.accepted = actor->Get_Action()->Attack(params);
   } else if (b.shootAt) {
     params.Set_Attack(b.shootPoint, 80.0f, 1.0f, true);
+    // A building isn't a physical object: the line-of-fire check never sees
+    // it as an enemy and holds fire forever. Shooting a building, fire.
+    params.AttackCheckBlocked = false;
+    // ...and "aimed at it yet?" never says yes for a point on a building:
+    // fire while turning toward it.
+    params.AttackForceFire = true;
     b.accepted = actor->Get_Action()->Attack(params);
   } else if (move) {
     b.accepted = actor->Get_Action()->Goto(params);
@@ -386,9 +393,11 @@ public:
         s->Get_Position(&p);
         s->Get_Velocity(vel);
       }
-      Say("bot %s %s %s %s at %.1f %.1f %.1f, speed %.1f, waypoint %d/%d to %.1f %.1f, replans %d\n", b.name.c_str(),
+      int rounds = s && s->Get_Weapon() ? s->Get_Weapon()->Get_Total_Rounds() : -1;
+      Say("bot %s %s %s %s at %.1f %.1f %.1f, speed %.1f, waypoint %d/%d to %.1f %.1f, replans %d, order %s%s, rounds %d\n", b.name.c_str(),
           b.team == PLAYERTYPE_GDI ? "GDI" : "Nod", GOALS[b.goal], s ? "alive" : "dead", p.X, p.Y, p.Z, vel.Length(),
-          (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck);
+          (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck, b.accepted ? "taken" : "refused",
+          b.shootAt ? ", shooting a point" : b.targetId ? ", shooting a target" : "", rounds);
     }
     Say("%d bots, walking grids: soldiers %d nodes, vehicles %d\n", (int)Bots.size(), NavGrid::Node_Count(NavGrid::SOLDIER), NavGrid::Node_Count(NavGrid::VEHICLE));
   }
@@ -456,6 +465,7 @@ public:
 //   bot_do <id> enter [vehicle]     get into the empty vehicle next to it (no id: the use key)
 //   bot_do <id> maneuver steer_left|steer_right|reverse_left|reverse_right|strafe_left|strafe_right|replan|wait|get_out
 //   bot_do <id> leave_tiberium     walk off the field by the shortest way
+//   bot_do <id> place x y z        testing: put it there
 //   bot_do <id> jump
 //   bot_do <id> say team|all <text>
 
@@ -692,6 +702,23 @@ void Emit_State(double now) {
   Rebel_JS_Bot_State(j.c_str());
 }
 
+class BotBuildingsConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_buildings"; }
+  const char *Get_Help(void) override { return "BOT_BUILDINGS - list the buildings: id, team, health, position."; }
+  void Activate(const char *) override {
+    for (SLNode<BuildingGameObj> *n = GameObjManager::Get_Building_Game_Obj_List()->Head(); n; n = n->Next()) {
+      BuildingGameObj *bld = n->Data();
+      Vector3 p;
+      bld->Get_Position(&p);
+      DefenseObjectClass *d = bld->Get_Defense_Object();
+      Say("building %d %s %s hp %.3f (health %.1f/%.1f, shield %.1f/%.1f) at %.1f %.1f %.1f\n", bld->Get_ID(),
+          bld->Get_Definition().Get_Name(), Team_Name(bld->Get_Player_Type()), bld->Is_Destroyed() ? 0.0f : Health_Of(bld),
+          d->Get_Health(), d->Get_Health_Max(), d->Get_Shield_Strength(), d->Get_Shield_Strength_Max(), p.X, p.Y, p.Z);
+    }
+  }
+};
+
 class BotBrainConsoleFunctionClass : public ConsoleFunctionClass {
 public:
   const char *Get_Name(void) override { return "bot_brain"; }
@@ -829,6 +856,14 @@ public:
         b.detourUntil = emscripten_get_now() + 5000;
         b.lastGoto = 0;
       }
+    } else if (!strcmp(verb, "place") && s && sscanf(rest, "%f %f %f", &x, &y, &z) == 3) {
+      // Testing: put the bot somewhere (no walking).
+      s->Set_Position(Vector3(x, y, z));
+      Vector3 now_at;
+      s->Get_Position(&now_at);
+      Say("%s placed at %.1f %.1f %.1f\n", b.name.c_str(), now_at.X, now_at.Y, now_at.Z);
+      b.path.clear();
+      b.wp = 0;
     } else if (!strcmp(verb, "jump")) {
       if (s)
         s->Set_Boolean_Control(ControlClass::BOOLEAN_JUMP);
@@ -856,6 +891,7 @@ void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
   list.Add(new BotBrainConsoleFunctionClass());
   list.Add(new BotDoConsoleFunctionClass());
   list.Add(new BotNavConsoleFunctionClass());
+  list.Add(new BotBuildingsConsoleFunctionClass());
 }
 
 int Rebel_Bots_Count(void) { return (int)Bots.size(); }

@@ -1194,9 +1194,11 @@ bool WWAudioClass::Remove_From_Playlist(AudibleSoundClass *sound_obj) {
         if (sound_obj == m_Playlist[page][index]) {
 
           //
-          // Add this sound to the 'completed' list
+          // Add this sound to the 'completed' list (once: freeing it twice
+          // would touch a released sound)
           //
-          m_CompletedSounds.push_back(sound_obj);
+          if (std::find(m_CompletedSounds.begin(), m_CompletedSounds.end(), sound_obj) == m_CompletedSounds.end())
+            m_CompletedSounds.push_back(sound_obj);
           retval = true;
         }
       }
@@ -1298,6 +1300,7 @@ void WWAudioClass::On_Frame_Update(unsigned int milliseconds) {
   //	Update the sound scene as necessary
   //
   if (m_CurrPage == PAGE_PRIMARY && m_SoundScene != nullptr) {
+    WWPROFILE("Sound scene");
     m_SoundScene->On_Frame_Update(milliseconds);
     m_SoundScene->Collect_Logical_Sounds();
   }
@@ -1307,7 +1310,11 @@ void WWAudioClass::On_Frame_Update(unsigned int milliseconds) {
   //
   // Loop through all the entries in the playlist
   //
-  for (auto sound_obj : m_Playlist[m_CurrPage]) {
+  // By index: a sound's update can start another sound (Add_To_Playlist
+  // appends), and a range-for over a vector that grows reads freed memory.
+  WWPROFILE("Playlist");
+  for (size_t index = 0; index < m_Playlist[m_CurrPage].size(); index++) {
+    AudibleSoundClass *sound_obj = m_Playlist[m_CurrPage][index];
 
     //
     // Update this sound object

@@ -231,8 +231,17 @@ try {
   for (let i = 0; i < (+process.env.NET_SAMPLES || 4) && clients.some((c) => c.star); i++) {
     await clients[0].page.waitForTimeout(5000);
     for (const c of clients) {
-      const [ping, fix] = await c.page.evaluate(() => [Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1, Module._Rebel_Net_Corrections ? Module.UTF8ToString(Module._Rebel_Net_Corrections()) : '']);
-      console.log(`${stamp()} ${c.name} ping ${ping} ms corrections ${fix}`);
+      // A page that stops answering (hung, crashed) is a finding: say so and
+      // take a picture, instead of waiting on it.
+      const answer = c.page.evaluate(() => [Module._Rebel_My_Ping ? Module._Rebel_My_Ping() : -1, Module._Rebel_Net_Corrections ? Module.UTF8ToString(Module._Rebel_Net_Corrections()) : '']);
+      const r = await Promise.race([answer, new Promise((res) => setTimeout(() => res(null), 15000))]);
+      if (!r) {
+        console.log(`${stamp()} ${c.name} PAGE UNRESPONSIVE (no answer in 15 s)`);
+        await shot(c, 'unresponsive');
+        save();
+        continue;
+      }
+      console.log(`${stamp()} ${c.name} ping ${r[0]} ms corrections ${r[1]}`);
     }
   }
   // Let textures and the spawn settle, then walk forward a little and check

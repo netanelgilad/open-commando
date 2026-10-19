@@ -2573,6 +2573,15 @@ void Give_Money(GameObject *object, float money, bool entire_team) {
   SmartGameObj *smart = object->As_SmartGameObj();
   if (smart) {
     if (entire_team) {
+#ifdef REBEL_PORTABLE
+      // Every player's soldier on the team, bots included (not only "stars").
+      for (SLNode<SmartGameObj> *n = GameObjManager::Get_Smart_Game_Obj_List()->Head(); n; n = n->Next()) {
+        SoldierGameObj *obj = n->Data()->As_SoldierGameObj();
+        if (obj && obj->Get_Player_Data() && obj->Is_Teammate(smart)) {
+          obj->Get_Player_Data()->Increment_Money(money);
+        }
+      }
+#else
       SLNode<SoldierGameObj> *objnode;
       for (objnode = GameObjManager::Get_Star_Game_Obj_List()->Head(); objnode; objnode = objnode->Next()) {
         SoldierGameObj *obj = objnode->Data();
@@ -2580,6 +2589,7 @@ void Give_Money(GameObject *object, float money, bool entire_team) {
           obj->Get_Player_Data()->Increment_Money(money);
         }
       }
+#endif
     } else {
       if (smart->Get_Player_Data()) {
         smart->Get_Player_Data()->Increment_Money(money);

@@ -668,6 +668,19 @@ void BaseControllerClass::Distribute_Funds_To_Each_Teammate(int funds) {
     return;
   }
 
+#ifdef REBEL_PORTABLE
+  //
+  //	Every player's soldier on the team, bots included (they aren't "stars",
+  //	the human-controlled list, and got no team income).
+  //
+  for (SLNode<SmartGameObj> *n = GameObjManager::Get_Smart_Game_Obj_List()->Head(); n != NULL; n = n->Next()) {
+    SoldierGameObj *player = n->Data()->As_SoldierGameObj();
+    if (player != NULL && player->Get_Player_Type() == PlayerType && player->Get_Player_Data() != NULL) {
+      player->Get_Player_Data()->Increment_Money(funds);
+    }
+  }
+  return;
+#endif
   //
   //	Loop over all the players in the game
   //

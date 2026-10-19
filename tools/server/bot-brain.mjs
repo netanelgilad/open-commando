@@ -530,9 +530,10 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   function questionsFor(state, bb, objective, all = false) {
     const plans = Object.fromEntries(bb.plans.map((p) => [p.id, p.text]));
     // Shooting is a reflex: with enemies in sight the question is which one.
-    const target = state.enemies_in_sight.length ? {} : { none: 'Nothing to shoot at.' };
+    const atBuilding = objective?.building && objective.distance < 45 && objective.enemy;
+    const target = state.enemies_in_sight.length || atBuilding ? {} : { none: 'Nothing to shoot at.' };
     for (const e of state.enemies_in_sight) target[`enemy_${e.id}`] = `Shoot the ${e.kind}${e.name ? ` (${e.name})` : ''}, ${e.distance} m away, health ${pct(e.health)}.`;
-    if (objective?.building && objective.distance < 45 && objective.enemy) target.building = `Shoot the enemy ${objective.name}.`;
+    if (atBuilding) target.building = `Shoot the enemy ${objective.name}.`;
     // How to move: only what makes sense now.
     const moves = { advance: `Go on with the plan: move toward ${objective?.name || 'the objective'}.` };
     if (state.on_tiberium) moves.leave_tiberium = 'Get off the tiberium now: it is hurting you.';
