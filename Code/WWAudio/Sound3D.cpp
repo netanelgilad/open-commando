@@ -38,6 +38,7 @@
 #include <algorithm>
 
 #include "Sound3D.h"
+#include "wwprofile.h"
 #include "WWAudio.h"
 #include "SoundScene.h"
 #include "utils.h"
@@ -519,6 +520,7 @@ void Sound3DClass::Allocate_Miles_Handle() {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 void Sound3DClass::Add_To_Scene(bool start_playing) {
+  WWPROFILE("3D sound add to scene");
   SoundSceneClass *scene = WWAudioClass::Get_Instance()->Get_Sound_Scene();
   if ((scene != nullptr) && (m_Scene == nullptr)) {
 
@@ -538,6 +540,7 @@ void Sound3DClass::Add_To_Scene(bool start_playing) {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 void Sound3DClass::Remove_From_Scene() {
+  WWPROFILE("3D sound remove from scene");
   if (m_Scene != nullptr) {
 
     // Determine what culling system this sound belongs to

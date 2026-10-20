@@ -944,6 +944,7 @@ void WeaponClass::Do_Firing_Effects(void) {
 #if 01
     // create muzzle flash
     if (Definition->MuzzleFlashPhysDefID != 0) {
+      WWPROFILE("Muzzle flash");
 
       DefinitionClass *def = DefinitionMgrClass::Find_Definition(Definition->MuzzleFlashPhysDefID);
       if (def != NULL) {
@@ -984,6 +985,7 @@ void WeaponClass::Do_Firing_Effects(void) {
   }
 
   // Make the Gunshot sound
+  WWPROFILE("Firing sound");
 
   //
   //	Determine which sound to play, the primary or secondary firing sound?

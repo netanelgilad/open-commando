@@ -217,7 +217,9 @@ function scriptedDecide(state, questions) {
       answers[id] = one(opts, want);
     } else if (id === 'target') {
       const close = seen.filter((e) => e.distance < 70).sort((a, b) => a.distance - b.distance)[0];
-      answers[id] = one(opts, close && opts.includes(`enemy_${close.id}`) ? `enemy_${close.id}` : opts.find((o) => o.startsWith('enemy_')) || (opts.includes('building') ? 'building' : 'none'));
+      const veryClose = seen.find((e) => e.distance < 20);
+      const building = opts.find((o) => o.startsWith('bld_')) || (opts.includes('building') ? 'building' : null);
+      answers[id] = one(opts, veryClose && opts.includes(`enemy_${veryClose.id}`) ? `enemy_${veryClose.id}` : building || (close && opts.includes(`enemy_${close.id}`) ? `enemy_${close.id}` : opts.find((o) => o.startsWith('enemy_')) || 'none'));
     } else if (id === 'move') {
       const pick = opts.includes('leave_tiberium') ? 'leave_tiberium' : me.health < 0.25 && opts.includes('fall_back') ? 'fall_back' : seen.some((e) => e.distance < 25) && opts.includes('strafe') ? 'strafe' : opts.includes('join_squad') ? 'join_squad' : 'advance';
       answers[id] = one(opts, pick);
@@ -531,7 +533,10 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const plans = Object.fromEntries(bb.plans.map((p) => [p.id, p.text]));
     // Shooting is a reflex: with enemies in sight the question is which one.
     const atBuilding = objective?.building && objective.distance < 45 && objective.enemy;
-    const target = state.enemies_in_sight.length || atBuilding ? {} : { none: 'Nothing to shoot at.' };
+    // Any enemy building close by is a target too (not only the objective).
+    const nearBuildings = world.buildings.filter((x) => x.team === enemyOf(state.me.team) && x.hp > 0 && dist(x.pos, state.me.pos) < 40);
+    const target = state.enemies_in_sight.length || atBuilding || nearBuildings.length ? {} : { none: 'Nothing to shoot at.' };
+    for (const x of nearBuildings) target[`bld_${x.id}`] = `Shoot the enemy ${buildingName(x)} (${pct(x.hp)}, ${Math.round(dist(x.pos, state.me.pos))} m away).`;
     for (const e of state.enemies_in_sight) target[`enemy_${e.id}`] = `Shoot the ${e.kind}${e.name ? ` (${e.name})` : ''}, ${e.distance} m away, health ${pct(e.health)}.`;
     if (atBuilding) target.building = `Shoot the enemy ${objective.name}.`;
     // How to move: only what makes sense now.
@@ -656,7 +661,9 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     }
     // What to shoot.
     const t = answers.target?.choice || 'none';
-    if (t.startsWith('enemy_')) cmd('fire', `target ${t.slice(6)}`);
+    const bld = t.startsWith('bld_') && world.buildings.find((x) => x.id === +t.slice(4));
+    if (bld) cmd('fire', `shoot ${bld.pos[0].toFixed(1)} ${bld.pos[1].toFixed(1)} ${(bld.pos[2] + 2).toFixed(1)}`);
+    else if (t.startsWith('enemy_')) cmd('fire', `target ${t.slice(6)}`);
     else if (t === 'building' && objective) cmd('fire', `shoot ${objective.pos[0].toFixed(1)} ${objective.pos[1].toFixed(1)} ${(objective.pos[2] + 2).toFixed(1)}`);
     else cmd('fire', 'hold_fire');
     // Getting around something (the maneuver question).

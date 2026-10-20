@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include "wwprofile.h"
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -87,7 +88,12 @@ bool Parse_Wav(const void *image, uint32_t size_hint, WavInfo &w) {
       w.data_len = std::min(len, w.file_len - (off + 8));
       break;
     }
-    off += 8 + len + (len & 1);
+    // 64-bit: a chunk with a garbage length must end the walk, not wrap the
+    // offset around to the start (that loops forever: a client hung on it).
+    uint64_t next = (uint64_t)off + 8u + len + (len & 1u);
+    if (next <= off || next > w.file_len)
+      break;
+    off = (uint32_t)next;
   }
   if (have_fmt && w.format == WAVE_FORMAT_IMA_ADPCM && !w.samples_per_block && w.channels)
     w.samples_per_block = (uint32_t)((w.block_align - 4 * w.channels) * 8 / (4 * w.channels) + 1);
@@ -383,7 +389,8 @@ CachedBuffer *Load_Buffer(const void *image, uint32_t size, bool mp3_hint, Cache
   Pcm pcm;
   bool ok = is_wav ? Decode_Wav(image, size, pcm)
                    : ((mp3_hint || Looks_Like_Mp3(image, size)) && Decode_Mp3(image, size, pcm));
-  if (!ok) {
+  if (!ok || pcm.Frames() == 0 || pcm.rate <= 0) {
+    // (An empty buffer can stall Emscripten's OpenAL scheduler too.)
     Set_Error("could not decode sample");
     return nullptr;
   }
@@ -766,6 +773,7 @@ static void Start(Sample *s) {
 }
 
 extern "C" void AIL_start_sample(HSAMPLE h) {
+  WWPROFILE("OpenAL start");
   LOCK;
   Start(As_Sample(h));
 }
@@ -778,6 +786,7 @@ extern "C" void AIL_stop_sample(HSAMPLE h) {
 }
 
 extern "C" void AIL_resume_sample(HSAMPLE h) {
+  WWPROFILE("OpenAL start");
   LOCK;
   Sample *s = As_Sample(h);
   if (!s || !s->buf)
@@ -858,11 +867,23 @@ extern "C" S32 AIL_sample_loop_count(HSAMPLE h) {
   return s ? s->loop_count : 0;
 }
 
+// Offsets are kept inside the buffer: at or past its end, Emscripten's OpenAL
+// scheduler computes a zero or negative duration and loops forever (a client
+// froze mid-fight that way: sounds restarted at where they'd be, past the end).
+static float Clamped_Seconds(const CachedBuffer *b, float sec) {
+  float len = b->rate > 0 ? (float)b->frames / (float)b->rate : 0.0f;
+  if (len <= 0.05f || sec <= 0.0f)
+    return 0.0f;
+  sec = fmodf(sec, len);
+  return std::min(sec, len - 0.05f);
+}
+
 extern "C" void AIL_set_sample_ms_position(HSAMPLE h, S32 ms) {
+  WWPROFILE("OpenAL seek");
   LOCK;
   Sample *s = As_Sample(h);
   if (s && s->buf)
-    alSourcef(s->source, AL_SEC_OFFSET, ms / 1000.0f);
+    alSourcef(s->source, AL_SEC_OFFSET, Clamped_Seconds(s->buf, ms / 1000.0f));
 }
 
 extern "C" void AIL_sample_ms_position(HSAMPLE h, S32 *total_ms, S32 *current_ms) {
@@ -1162,8 +1183,11 @@ extern "C" U32 AIL_3D_sample_loop_count(H3DSAMPLE h) { return (U32)AIL_sample_lo
 extern "C" void AIL_set_3D_sample_offset(H3DSAMPLE h, U32 offset) {
   LOCK;
   Sample *s = As_Sample(h);
-  if (s && s->buf)
-    alSourcei(s->source, AL_BYTE_OFFSET, (ALint)offset);
+  if (s && s->buf) {
+    float bytes_per_sec = (float)s->buf->rate * s->buf->channels * 2.0f;
+    float sec = bytes_per_sec > 0 ? Clamped_Seconds(s->buf, offset / bytes_per_sec) : 0.0f;
+    alSourcei(s->source, AL_BYTE_OFFSET, (ALint)(sec * bytes_per_sec) & ~(ALint)(s->buf->channels * 2 - 1));
+  }
 }
 
 extern "C" U32 AIL_3D_sample_offset(H3DSAMPLE h) {

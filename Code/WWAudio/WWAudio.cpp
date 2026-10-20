@@ -1310,10 +1310,14 @@ void WWAudioClass::On_Frame_Update(unsigned int milliseconds) {
   //
   // Loop through all the entries in the playlist
   //
-  // By index: a sound's update can start another sound (Add_To_Playlist
-  // appends), and a range-for over a vector that grows reads freed memory.
+  // By index, and only the sounds there when the frame began: a sound's
+  // update can start another (an ended sound's callbacks; Add_To_Playlist
+  // appends). A range-for over a growing vector reads freed memory, and
+  // following the new ones too can chain forever within one frame (a
+  // client hung there in big fights); they get their update next frame.
   WWPROFILE("Playlist");
-  for (size_t index = 0; index < m_Playlist[m_CurrPage].size(); index++) {
+  const size_t playing = m_Playlist[m_CurrPage].size();
+  for (size_t index = 0; index < playing && index < m_Playlist[m_CurrPage].size(); index++) {
     AudibleSoundClass *sound_obj = m_Playlist[m_CurrPage][index];
 
     //

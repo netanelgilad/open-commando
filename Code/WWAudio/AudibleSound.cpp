@@ -38,6 +38,7 @@
 #include <algorithm>
 
 #include "AudibleSound.h"
+#include "wwprofile.h"
 #include "WWAudio.h"
 #include "ww3d.h"
 #include "wwdebug.h"
@@ -366,6 +367,7 @@ bool AudibleSoundClass::Verify_Playability() {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 bool AudibleSoundClass::Play(bool alloc_handle) {
+  WWPROFILE("Sound play");
   MMSLockClass lock;
 
   //
@@ -521,6 +523,7 @@ bool AudibleSoundClass::Resume() {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 bool AudibleSoundClass::Stop(bool remove_from_playlist) {
+  WWPROFILE("Sound stop");
   MMSLockClass lock;
 
   // Assume failure
@@ -579,6 +582,7 @@ bool AudibleSoundClass::Stop(bool remove_from_playlist) {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 void AudibleSoundClass::Seek(unsigned long milliseconds) {
+  WWPROFILE("Sound seek");
   MMSLockClass lock;
 
   if ((milliseconds >= 0) && (milliseconds < m_Length)) {
@@ -1121,6 +1125,7 @@ void AudibleSoundClass::Set_Position(const Vector3 &position) {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 void AudibleSoundClass::Add_To_Scene(bool start_playing) {
+  WWPROFILE("Sound add to scene");
   SoundSceneClass *scene = WWAudioClass::Get_Instance()->Get_Sound_Scene();
   if ((scene != nullptr) && (m_Scene == nullptr)) {
 
@@ -1138,6 +1143,7 @@ void AudibleSoundClass::Add_To_Scene(bool start_playing) {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 void AudibleSoundClass::Remove_From_Scene() {
+  WWPROFILE("Sound remove from scene");
   if (m_Scene != nullptr) {
 
     //

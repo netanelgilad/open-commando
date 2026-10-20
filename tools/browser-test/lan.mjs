@@ -237,6 +237,23 @@ try {
       const r = await Promise.race([answer, new Promise((res) => setTimeout(() => res(null), 15000))]);
       if (!r) {
         console.log(`${stamp()} ${c.name} PAGE UNRESPONSIVE (no answer in 15 s)`);
+        // Where it's stuck: pause it through the DevTools protocol and print
+        // the call stack (JS and wasm frames), once.
+        if (!c.stackDumped) {
+          c.stackDumped = true;
+          const dump = async () => {
+            const cdp = await c.page.context().newCDPSession(c.page);
+            const paused = new Promise((res) => cdp.once('Debugger.paused', res));
+            await cdp.send('Debugger.enable');
+            await cdp.send('Debugger.pause');
+            const ev = await Promise.race([paused, new Promise((res) => setTimeout(() => res(null), 10000))]);
+            if (ev) for (const f of ev.callFrames.slice(0, 40)) console.log(`${stamp()}   at ${f.functionName || '(anonymous)'} ${f.url.split('/').pop()}:${f.location.lineNumber}:${f.location.columnNumber}`);
+            else console.log(`${stamp()}   (could not pause it)`);
+            await cdp.send('Debugger.resume').catch(() => {});
+          };
+          // A page frozen hard enough doesn't answer DevTools either: give up after 20 s.
+          await Promise.race([dump().catch((e) => console.log(`${stamp()}   stack: ${e.message}`)), new Promise((res) => setTimeout(() => res(console.log(`${stamp()}   (DevTools did not answer)`)), 20000))]);
+        }
         await shot(c, 'unresponsive');
         save();
         continue;
