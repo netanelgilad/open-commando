@@ -1287,6 +1287,7 @@ void WWAudioClass::On_Frame_Update(unsigned int milliseconds) {
   // Free any sounds we completed last frame
   //
   Free_Completed_Sounds();
+  WWAudioThreadsClass::Release_Due_Objects();
 
   //
   // Calculate the time in ms since the last frame

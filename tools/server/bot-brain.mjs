@@ -226,6 +226,11 @@ function scriptedDecide(state, questions) {
     } else if (id === 'callout') {
       const pick = baseAttacked && opts.includes('base_under_attack') ? 'base_under_attack' : me.health < 0.3 && seen.length ? 'need_help' : seen.length >= 2 ? 'enemies_spotted' : 'none';
       answers[id] = one(opts, opts.includes(pick) ? pick : 'none');
+    } else if (id === 'buy') {
+      // Scripted bots buy too, now and then, something random they can
+      // afford (games need the variety: characters, vehicles, their weapons).
+      const items = opts.filter((o) => o !== 'none');
+      answers[id] = one(opts, items.length && Math.random() < 0.4 ? items[Math.floor(Math.random() * items.length)] : 'none');
     } else if (id === 'maneuver') {
       const sur = state.surroundings;
       const best = ['steer_left', 'steer_right'].filter((o) => opts.includes(o)).sort((a, b) => (b === 'steer_left' ? sur.clear_ahead_left_m : sur.clear_ahead_right_m) - (a === 'steer_left' ? sur.clear_ahead_left_m : sur.clear_ahead_right_m))[0];
@@ -326,6 +331,44 @@ export function llmPlanner(ai, stats, rec = () => {}) {
   };
 }
 
+// --- Mock models (--bot-brain mock): stand-ins with the models' behavior and
+// no calls, for fixtures (e.g. tools/browser-test/freeze-fixture.mjs): the
+// decider picks among the offered options at random, weighted toward the
+// first; the planner returns varied plans, often with a line of chat, after
+// a model-like delay.
+function mockDecider(stats) {
+  return async (state, questions) => {
+    await new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
+    stats.calls++;
+    const answers = {};
+    for (const [id, q] of Object.entries(questions)) {
+      if (q.type === 'noul') answers[id] = { probability: Math.random() * 0.8 };
+      else {
+        const opts = Object.keys(q.criteria || {});
+        const pick = opts[Math.random() < 0.5 ? 0 : Math.floor(Math.random() * opts.length)];
+        answers[id] = { choice: pick, probabilities: Object.fromEntries(opts.map((o) => [o, o === pick ? 0.7 : 0.3 / Math.max(1, opts.length - 1)])) };
+      }
+    }
+    return answers;
+  };
+}
+const MOCK_LINES = ['Pushing their base, cover me', 'Anyone got an APC?', 'Going left flank', 'Need backup at the refinery', 'On my way', 'Engineer here, I will fix it', 'Their harvester is wide open', 'Watch the tunnel', 'Rush now!', 'Holding the middle'];
+function mockPlanner(stats) {
+  return async (view, persona, notes, reason, options) => {
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 3000));
+    stats.calls++;
+    const pick = (list) => list[Math.floor(Math.random() * list.length)];
+    const plans = [];
+    const enemy = options.buildings.filter((b) => b.startsWith('enemy '));
+    const ours = options.buildings.filter((b) => b.startsWith('our '));
+    if (enemy.length) plans.push({ id: 'attack', text: `hit the ${pick(enemy)}`, kind: 'attack', building: pick(enemy) });
+    if (view.shop?.items?.length && Math.random() < 0.6) plans.unshift({ id: 'buy', text: 'gear up first', kind: 'buy', item: pick(view.shop.items).name });
+    if (ours.length) plans.push({ id: 'defend', text: `guard ${pick(ours)}`, kind: 'defend', building: pick(ours) });
+    plans.push({ id: 'roam', text: 'hunt in the field', kind: 'go', place: pick(options.places) });
+    return { plans, orders: [], say: Math.random() < 0.5 ? pick(MOCK_LINES) : '', note: '' };
+  };
+}
+
 // What the bot may say: one line, plain, short.
 const cleanSay = (t) => String(t || '').replace(/[\u2013\u2014]/g, ' - ').replace(/[\u2018\u2019]/g, "'").replace(/[^\x20-\x7e]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100);
 
@@ -387,9 +430,9 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   const teams = createTeams(); // roles and squads
 
   const stats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null };
-  const model = (mode === 'clef' || mode === 'hybrid') && ai?.url ? clefDecider(ai, stats) : null;
+  const model = mode === 'mock' ? mockDecider(stats) : (mode === 'clef' || mode === 'hybrid') && ai?.url ? clefDecider(ai, stats) : null;
   const planStats = { calls: 0, failed: 0, tokens: 0, ms: [], lastError: null, by: {} };
-  const planner = mode === 'hybrid' && ai?.url ? llmPlanner(ai, planStats, rec) : null;
+  const planner = mode === 'mock' ? mockPlanner(planStats) : mode === 'hybrid' && ai?.url ? llmPlanner(ai, planStats, rec) : null;
   const lastBotChat = {}; // per team: bots' lines at least 6 s apart
 
   // The match's model budget: past it, the bots play on scripted.

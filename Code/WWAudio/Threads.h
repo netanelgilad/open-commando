@@ -67,12 +67,13 @@ public:
   static void End_Delayed_Release_Thread(DWORD timeout = 20000);
   static void Add_Delayed_Release_Object(RefCountClass *object, DWORD delay = 2000);
   static void Flush_Delayed_Release_Objects();
+  // Releases the objects whose delay is up; called by the audio frame update.
+  static void Release_Due_Objects();
 
 private:
   //////////////////////////////////////////////////////////////////////
   //	Private methods
   //////////////////////////////////////////////////////////////////////
-  static void __cdecl Delayed_Release_Thread_Proc(LPVOID param);
 
   //////////////////////////////////////////////////////////////////////
   //	Private data types

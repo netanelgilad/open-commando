@@ -18,7 +18,7 @@
 //                                     SERVER_BIN=<dir> picks its build
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 const outDir = new URL('./out/', import.meta.url).pathname;
 mkdirSync(outDir, { recursive: true });
 const base = process.env.BASE || 'http://127.0.0.1:8461/';
@@ -59,6 +59,12 @@ async function player(name, profile) {
     if (/RuntimeError|abort/.test(t)) { p.crashed = true; console.log(`${stamp()} ${name}: ${t}`); }
     else if (NETWORK.test(t) && !/\[debug\]   ctl/.test(t)) console.log(`${stamp()} ${name}: ${t}`.slice(0, 260));
   });
+  // A DevTools session opened up front, with the profiler on: a frozen page
+  // may not answer new sessions or Debugger.enable (which parses the whole
+  // wasm), but the sampling profiler still sees what the main thread runs.
+  p.cdp = await ctx.newCDPSession(page);
+  await p.cdp.send('Profiler.enable');
+  await p.cdp.send('Profiler.setSamplingInterval', { interval: 1000 });
   page.on("pageerror", (e) => { p.crashed = true; console.log(`${stamp()} ${name}: PAGEERROR ${e.message}\n${e.stack}`); });
   // CLIENT_BASE: the first client from another build (e.g. /dbg/ for its logs).
   const from = name === 'client' && process.env.CLIENT_BASE ? process.env.CLIENT_BASE : base;
@@ -242,18 +248,35 @@ try {
         if (!c.stackDumped) {
           c.stackDumped = true;
           const dump = async () => {
-            const cdp = await c.page.context().newCDPSession(c.page);
-            const paused = new Promise((res) => cdp.once('Debugger.paused', res));
-            await cdp.send('Debugger.enable');
-            await cdp.send('Debugger.pause');
-            const ev = await Promise.race([paused, new Promise((res) => setTimeout(() => res(null), 10000))]);
-            if (ev) for (const f of ev.callFrames.slice(0, 40)) console.log(`${stamp()}   at ${f.functionName || '(anonymous)'} ${f.url.split('/').pop()}:${f.location.lineNumber}:${f.location.columnNumber}`);
-            else console.log(`${stamp()}   (could not pause it)`);
-            await cdp.send('Debugger.resume').catch(() => {});
+            await c.cdp.send('Profiler.start');
+            await new Promise((res) => setTimeout(res, 4000));
+            const { profile } = await c.cdp.send('Profiler.stop');
+            // Self time per function, and the hottest sample's call chain.
+            const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+            const parent = new Map();
+            for (const n of profile.nodes) for (const k of n.children || []) parent.set(k, n.id);
+            const hits = new Map();
+            for (const id of profile.samples) hits.set(id, (hits.get(id) || 0) + 1);
+            const top = [...hits].sort((a, b) => b[1] - a[1]);
+            const name = (n) => `${n.callFrame.functionName || '(anonymous)'} ${n.callFrame.url.split('/').pop()}`;
+            for (const [id, k] of top.slice(0, 8)) console.log(`${stamp()}   hot ${k} ${name(byId.get(id))}`);
+            if (top.length) {
+              for (let id = top[0][0], d = 0; id && d < 40; id = parent.get(id), d++) console.log(`${stamp()}   at ${name(byId.get(id))}`);
+            } else console.log(`${stamp()}   (no samples)`);
           };
           // A page frozen hard enough doesn't answer DevTools either: give up after 20 s.
           await Promise.race([dump().catch((e) => console.log(`${stamp()}   stack: ${e.message}`)), new Promise((res) => setTimeout(() => res(console.log(`${stamp()}   (DevTools did not answer)`)), 20000))]);
         }
+        // Spinning or blocked? The browser's processes' CPU use, from the OS.
+        try {
+          const ps = execSync('ps -axo pid,%cpu,rss,command', { encoding: 'utf8' }).split('\n');
+          for (const l of ps.filter((l) => /hromium|Chrome/.test(l) && /--type=/.test(l))) {
+            const m = /^\s*(\d+)\s+(\S+)\s+(\d+)\s.*--type=(\S+)/.exec(l);
+            if (m && (+m[2] > 1 || m[4] === 'renderer' || m[4] === 'gpu-process')) console.log(`${stamp()}   proc ${m[4]} pid ${m[1]} cpu ${m[2]}% rss ${(m[3] / 1024).toFixed(0)} MB`);
+          }
+        } catch (e) { console.log(`${stamp()}   ps: ${e.message}`); }
+        save();
+        console.log(`${stamp()} ${c.name} console saved`);
         await shot(c, 'unresponsive');
         save();
         continue;

@@ -67,58 +67,19 @@ WWAudioThreadsClass::~WWAudioThreadsClass() = default;
 //	Create_Delayed_Release_Thread
 //
 ///////////////////////////////////////////////////////////////////////////////////////////
-HANDLE WWAudioThreadsClass::Create_Delayed_Release_Thread(LPVOID param) {
-  //
-  //	If the thread isn't already running, then
-  //
-  if (m_hDelayedReleaseThread == (HANDLE)-1) {
-    m_hDelayedReleaseEvent = ::CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    m_hDelayedReleaseThread = (HANDLE)::_beginthread(Delayed_Release_Thread_Proc, 0, param);
-  }
+// The delayed releases ran on a thread of their own, which released sounds
+// (taking the audio lock) while holding the list's lock, and the main thread
+// takes the two the other way round (stopping a sound queues its buffer
+// here): a deadlock, and reference counts changed from two threads. They
+// run on the main thread now, from the audio frame update.
+HANDLE WWAudioThreadsClass::Create_Delayed_Release_Thread(LPVOID) { return (HANDLE)-1; }
 
-  return m_hDelayedReleaseThread;
-}
+void WWAudioThreadsClass::End_Delayed_Release_Thread(DWORD) { Flush_Delayed_Release_Objects(); }
 
-///////////////////////////////////////////////////////////////////////////////////////////
-//
-//	End_Delayed_Release_Thread
-//
-///////////////////////////////////////////////////////////////////////////////////////////
-void WWAudioThreadsClass::End_Delayed_Release_Thread(DWORD timeout) {
-  //
-  //	If the thread is running, then wait for it to finish
-  //
-  if (m_hDelayedReleaseThread != (HANDLE)-1) {
-    ::SetEvent(m_hDelayedReleaseEvent);
-    ::WaitForSingleObject(m_hDelayedReleaseThread, timeout);
-
-    m_hDelayedReleaseEvent = (HANDLE)-1;
-    m_hDelayedReleaseThread = (HANDLE)-1;
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-//
-//	Add_Delayed_Release_Object
-//
-///////////////////////////////////////////////////////////////////////////////////////////
 void WWAudioThreadsClass::Add_Delayed_Release_Object(RefCountClass *object, DWORD delay) {
   if (m_IsFlushing) {
     REF_PTR_RELEASE(object);
   } else {
-
-    //
-    //	Make sure we have a thread running that will handle
-    // the operation for us.
-    //
-    if (m_hDelayedReleaseThread == (HANDLE)-1) {
-      Create_Delayed_Release_Thread();
-    }
-
-    //
-    //	Wait for the release thread to finish using the
-    // list pointer
-    //
     {
       std::lock_guard lock(m_ListMutex);
 
@@ -171,69 +132,39 @@ void WWAudioThreadsClass::Flush_Delayed_Release_Objects() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 //
-//	Delayed_Release_Thread_Proc
+//	Release_Due_Objects
 //
 ///////////////////////////////////////////////////////////////////////////////////////////
-void __cdecl WWAudioThreadsClass::Delayed_Release_Thread_Proc(LPVOID /*param*/) {
-  const DWORD base_timeout = 2000;
-  DWORD timeout = base_timeout + rand() % 1000;
-
-  //
-  //	Keep looping forever until we are singalled to quit (or an error occurs)
-  //
-  while (::WaitForSingleObject(m_hDelayedReleaseEvent, timeout) == WAIT_TIMEOUT) {
-
-    {
-      std::lock_guard lock(m_ListMutex);
-
-      //
-      //	Loop through all the objects in our delay list, and
-      // free any that have expired.
-      //
-      DWORD current_time = TIMEGETTIME();
-      DELAYED_RELEASE_INFO *curr = nullptr;
-      DELAYED_RELEASE_INFO *prev = nullptr;
-      DELAYED_RELEASE_INFO *next = nullptr;
-      for (curr = m_ReleaseListHead; curr != nullptr; curr = next) {
-        next = curr->next;
-        prev = curr->prev;
-
-        //
-        //	If the time has expired, free the object
-        //
-        if (current_time >= curr->time) {
-
-          //
-          //	Unlink the object
-          //
-          if (curr == m_ReleaseListHead) {
-            m_ReleaseListHead = next;
-          }
-
-          if (prev != nullptr) {
-            prev->next = next;
-          }
-
-          if (next != nullptr) {
-            next->prev = prev;
-          }
-
-          //
-          //	Free the object
-          //
-          REF_PTR_RELEASE(curr->object);
-          SAFE_DELETE(curr);
+void WWAudioThreadsClass::Release_Due_Objects() {
+  // Unlinked under the lock, released after it: a release may queue more.
+  DELAYED_RELEASE_INFO *due = nullptr;
+  {
+    std::lock_guard lock(m_ListMutex);
+    DWORD current_time = TIMEGETTIME();
+    DELAYED_RELEASE_INFO *next = nullptr;
+    for (DELAYED_RELEASE_INFO *curr = m_ReleaseListHead; curr != nullptr; curr = next) {
+      next = curr->next;
+      if ((int)(current_time - curr->time) >= 0) {
+        if (curr == m_ReleaseListHead) {
+          m_ReleaseListHead = next;
         }
+        if (curr->prev != nullptr) {
+          curr->prev->next = next;
+        }
+        if (next != nullptr) {
+          next->prev = curr->prev;
+        }
+        curr->next = due;
+        due = curr;
       }
     }
-
-    //
-    //	To avoid 'periodic' releases, randomize our timeout
-    //
-    timeout = base_timeout + rand() % 1000;
   }
-
-  Flush_Delayed_Release_Objects();
+  while (due != nullptr) {
+    DELAYED_RELEASE_INFO *next = due->next;
+    REF_PTR_RELEASE(due->object);
+    SAFE_DELETE(due);
+    due = next;
+  }
 }
 
 /*
