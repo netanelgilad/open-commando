@@ -137,11 +137,14 @@ export default {
     if (ai) {
       if (request.method !== 'POST') return new Response('POST expected', { status: 405 });
       if (!env.START_TOKEN || request.headers.get('Authorization') !== `Bearer ${await aiKey(env.START_TOKEN, ai[1])}`) return new Response('forbidden', { status: 403 });
-      const { model, input } = await request.json().catch(() => ({}));
+      // affinity: callers sharing a prompt prefix (the bots' playbook) send
+      // the same id, so they reach the model instance that has it cached.
+      const { model, input, affinity } = await request.json().catch(() => ({}));
       if (!AI_MODELS[model] || !input) return new Response('bad request', { status: 400 });
       const t0 = Date.now();
       try {
-        const output = await env.AI.run(AI_MODELS[model], input);
+        const options = typeof affinity === 'string' && /^[\w.-]{1,64}$/.test(affinity) ? { extraHeaders: { 'x-session-affinity': affinity } } : {};
+        const output = await env.AI.run(AI_MODELS[model], input, options);
         return json({ ms: Date.now() - t0, output });
       } catch (e) {
         return json({ ms: Date.now() - t0, error: String(e) }, 502);

@@ -30,6 +30,14 @@
 #include "weapons.h"
 #include "vendor.h"
 #include "purchasesettings.h"
+#include "definitionmgr.h"
+#include "armedgameobj.h"
+#include "weaponmanager.h"
+#include "explosion.h"
+#include "combatchunkid.h"
+#include "mapmgr.h"
+#include "wwphysids.h"
+#include "physicalgameobj.h"
 #include "basecontroller.h"
 #include "sctextobj.h"
 #include "vehicle.h"
@@ -550,6 +558,163 @@ void Feel(SoldierGameObj *s, float out[6]) {
     s->Peek_Physical_Object()->Dec_Ignore_Counter();
 }
 
+// As the purchase menu: aircraft only on maps made for them.
+bool Can_Buy_Here(int kind, int def_id) {
+  if (kind == 0)
+    return true;
+  DefinitionClass *d = DefinitionMgrClass::Find_Definition(def_id, false);
+  if (!d)
+    return false;
+  PhysDefClass *phys = (PhysDefClass *)DefinitionMgrClass::Find_Definition(((PhysicalGameObjDef *)d)->Get_Phys_Def_ID(), false);
+  return !(phys && phys->Get_Class_ID() == CLASSID_VTOLVEHICLEDEF && !MapMgrClass::Are_VTOL_Vehicles_Enabled());
+}
+
+// Game facts for the bots' planner, from the game's own data (once per map):
+// what each weapon in the shop, and each base defense, does to infantry, a
+// tank and the map's buildings. Sustained damage per second (clip and reload
+// counted, plus the explosion) times the armor/warhead multipliers
+// (armor.ini), as seconds to kill: shield first, then health.
+struct Dps {
+  float damage = 0, rate = 0, range = 0; // damage per shot (all pellets), shots/s, m
+  int warhead = -1;
+  float splash = 0;
+  int splash_warhead = -1;
+};
+
+Dps Weapon_Dps(int weapon_id) {
+  Dps d;
+  WeaponDefinitionClass *w = (WeaponDefinitionClass *)DefinitionMgrClass::Find_Definition(weapon_id, false);
+  if (!w || w->Get_Class_ID() != CLASSID_DEF_WEAPON)
+    return d;
+  AmmoDefinitionClass *a = (AmmoDefinitionClass *)DefinitionMgrClass::Find_Definition(w->PrimaryAmmoDefID, false);
+  if (!a || a->Get_Class_ID() != CLASSID_DEF_AMMO)
+    return d;
+  int pellets = a->SprayCount > 1 ? (int)a->SprayCount : 1;
+  d.damage = (float)a->Damage * pellets;
+  d.warhead = (int)a->Warhead;
+  d.range = (float)a->Range;
+  float rof = a->RateOfFire > 0 ? a->RateOfFire : 1.0f;
+  float per_shot = 1.0f / rof + (float)a->ChargeTime;
+  int clip = (int)w->ClipSize;
+  if (clip > 0 && (float)w->ReloadTime > 0) // a clip, then the reload
+    d.rate = clip / (clip * per_shot + (float)w->ReloadTime);
+  else
+    d.rate = 1.0f / per_shot;
+  ExplosionDefinitionClass *e = (ExplosionDefinitionClass *)DefinitionMgrClass::Find_Definition(a->ExplosionDefID, false);
+  if (e && e->Get_Class_ID() == CLASSID_DEF_EXPLOSION && e->DamageStrength > 0) {
+    d.splash = e->DamageStrength * pellets;
+    d.splash_warhead = e->DamageWarhead;
+  }
+  return d;
+}
+
+float Dps_Against(const Dps &d, ArmorType armor) {
+  float v = d.damage * ArmorWarheadManager::Get_Damage_Multiplier(armor, (WarheadType)d.warhead);
+  if (d.splash_warhead >= 0)
+    v += d.splash * ArmorWarheadManager::Get_Damage_Multiplier(armor, (WarheadType)d.splash_warhead);
+  return v * d.rate;
+}
+
+// Seconds to destroy a target with this defense (shield, then health); -1: can't hurt it.
+float Seconds_To_Kill(const Dps &d, const DefenseObjectDefClass &def, ArmorType skin) {
+  if (d.warhead < 0)
+    return -1;
+  float t = 0;
+  if ((float)def.ShieldStrengthMax > 0) {
+    float v = Dps_Against(d, (ArmorType)(unsigned)def.ShieldType);
+    if (v <= 0)
+      return -1;
+    t += (float)def.ShieldStrengthMax / v;
+  }
+  float v = Dps_Against(d, skin);
+  if (v <= 0)
+    return -1;
+  return t + (float)def.HealthMax / v;
+}
+
+const DamageableGameObjDef *Find_Damageable(const char *preset) {
+  DefinitionClass *def = DefinitionMgrClass::Find_Named_Definition(preset, false);
+  return def ? (const DamageableGameObjDef *)def : nullptr;
+}
+
+void Weapon_Facts_Json(std::string &j, int weapon_id, const std::vector<BuildingGameObj *> &buildings) {
+  char buf[160];
+  Dps d = Weapon_Dps(weapon_id);
+  const DamageableGameObjDef *inf = Find_Damageable("CnC_GDI_MiniGunner_1Off");
+  const DamageableGameObjDef *tank = Find_Damageable("CnC_GDI_Medium_Tank");
+  auto ttk = [&](const DamageableGameObjDef *t) {
+    return t ? Seconds_To_Kill(d, t->Get_DefenseObjectDef(), (ArmorType)(unsigned)t->Get_DefenseObjectDef().Skin) : -1.0f;
+  };
+  snprintf(buf, sizeof(buf), "{\"range\":%.0f,\"dps\":%.0f,\"infantry_s\":%.1f,\"tank_s\":%.1f,\"buildings\":{", d.range,
+           d.damage * d.rate, ttk(inf), ttk(tank));
+  j += buf;
+  bool first = true;
+  for (BuildingGameObj *b : buildings) {
+    const BuildingGameObjDef &def = b->Get_Definition();
+    const DefenseObjectDefClass &dd = def.Get_DefenseObjectDef();
+    snprintf(buf, sizeof(buf), "%s\"%s\":[%.0f,%.0f]", first ? "" : ",", def.Get_Name(),
+             Seconds_To_Kill(d, dd, (ArmorType)(unsigned)dd.Skin), Seconds_To_Kill(d, dd, def.Get_MCT_Skin()));
+    j += buf;
+    first = false;
+  }
+  j += "}}";
+}
+
+void Facts_Json(std::string &j) {
+  std::vector<BuildingGameObj *> buildings;
+  for (SLNode<BuildingGameObj> *n = GameObjManager::Get_Building_Game_Obj_List()->Head(); n; n = n->Next()) {
+    bool seen = false; // one per kind (both teams' refineries are alike)
+    for (BuildingGameObj *b : buildings)
+      seen |= strcmp(b->Get_Definition().Get_Name(), n->Data()->Get_Definition().Get_Name()) == 0;
+    if (!seen)
+      buildings.push_back(n->Data());
+  }
+  j += "{\"weapons\":{";
+  bool first = true;
+  auto add = [&](const char *key, const DefinitionClass *preset) {
+    if (!preset)
+      return;
+    int weapon = ((const ArmedGameObjDef *)preset)->Get_Weapon_Def_ID();
+    if (!weapon)
+      return;
+    j += first ? "\"" : ",\"";
+    j += key;
+    j += "\":";
+    Weapon_Facts_Json(j, weapon, buildings);
+    first = false;
+  };
+  for (int t = 0; t < 2; t++)
+    for (int kind = 0; kind < 2; kind++) {
+      PurchaseSettingsDefClass *def = PurchaseSettingsDefClass::Find_Definition(
+          kind == 0 ? PurchaseSettingsDefClass::TYPE_CLASSES : PurchaseSettingsDefClass::TYPE_VEHICLES,
+          t == 0 ? PurchaseSettingsDefClass::TEAM_GDI : PurchaseSettingsDefClass::TEAM_NOD);
+      for (int i = 0; def && i < 10; i++) {
+        DefinitionClass *preset = def->Get_Definition(i) ? DefinitionMgrClass::Find_Definition(def->Get_Definition(i), false) : nullptr;
+        if (preset)
+          add(preset->Get_Name(), preset);
+      }
+    }
+  // The base defenses (vehicle-like objects on the map) and the free characters.
+  for (SLNode<SmartGameObj> *n = GameObjManager::Get_Smart_Game_Obj_List()->Head(); n; n = n->Next()) {
+    VehicleGameObj *v = n->Data()->As_VehicleGameObj();
+    if (v && v->Is_Turret())
+      add(v->Get_Definition().Get_Name(), &v->Get_Definition());
+  }
+  for (const char *free : {"CnC_GDI_MiniGunner_0", "CnC_GDI_RocketSoldier_0", "CnC_GDI_Grenadier_0", "CnC_GDI_Engineer_0",
+                           "CnC_Nod_Minigunner_0", "CnC_Nod_RocketSoldier_0", "CnC_Nod_FlameThrower_0", "CnC_Nod_Engineer_0"})
+    add(free, DefinitionMgrClass::Find_Named_Definition(free, false));
+  j += "},\"buildings\":{";
+  first = true;
+  for (BuildingGameObj *b : buildings) {
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%s\"%s\":%.0f", first ? "" : ",", b->Get_Definition().Get_Name(),
+             (float)b->Get_Definition().Get_DefenseObjectDef().HealthMax);
+    j += buf;
+    first = false;
+  }
+  j += "}}";
+}
+
 void Emit_State(double now) {
   std::string j;
   j.reserve(8192);
@@ -557,6 +722,12 @@ void Emit_State(double now) {
   snprintf(buf, sizeof(buf), "{\"t\":%.0f,\"map\":", now);
   j += buf;
   Json_String(j, The_Game()->Get_Map_Name().Peek_Buffer());
+  static StringClass facts_map;
+  if (facts_map != The_Game()->Get_Map_Name()) { // once per map
+    facts_map = The_Game()->Get_Map_Name();
+    j += ",\"facts\":";
+    Facts_Json(j);
+  }
   j += ",\"buildings\":[";
   bool first = true;
   for (SLNode<BuildingGameObj> *n = GameObjManager::Get_Building_Game_Obj_List()->Head(); n; n = n->Next()) {
@@ -636,12 +807,22 @@ void Emit_State(double now) {
           t == 0 ? PurchaseSettingsDefClass::TEAM_GDI : PurchaseSettingsDefClass::TEAM_NOD);
       bool any = false;
       for (int i = 0; def && i < 10; i++) { // PurchaseSettingsDefClass::MAX_ENTRIES (protected)
-        if (!def->Get_Definition(i) || def->Get_Cost(i) <= 0)
+        if (!def->Get_Definition(i) || def->Get_Cost(i) <= 0 || !Can_Buy_Here(kind, def->Get_Definition(i)))
           continue;
         snprintf(buf, sizeof(buf), "%s{\"index\":%d,\"cost\":%d,\"name\":", any ? "," : "", i, def->Get_Cost(i));
         j += buf;
         WideStringClass name(def->Get_Name(i));
         Json_String(j, Narrow(name));
+        // The preset and its main weapon: the terminal's names repeat
+        // (two Sydneys, three Black Hands).
+        DefinitionClass *preset = DefinitionMgrClass::Find_Definition(def->Get_Definition(i), false);
+        j += ",\"preset\":";
+        Json_String(j, preset ? preset->Get_Name() : "");
+        DefinitionClass *weapon = nullptr;
+        if (preset && kind == 0)
+          weapon = DefinitionMgrClass::Find_Definition(((ArmedGameObjDef *)preset)->Get_Weapon_Def_ID(), false);
+        j += ",\"weapon\":";
+        Json_String(j, weapon ? weapon->Get_Name() : "");
         j += "}";
         any = true;
       }

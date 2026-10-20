@@ -118,6 +118,7 @@ public:
 
   int Get_Damage_Report(int team) const;
   int Get_Destroy_Report(int team) const;
+  ArmorType Get_MCT_Skin(void) const { return MCTSkin; }
 
 protected:
   StringClass MeshPrefix;

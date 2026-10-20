@@ -62,6 +62,7 @@ class ArmedGameObj; // declared ahead of its friend use (MSVC-only lookup)
 class ArmedGameObjDef : public PhysicalGameObjDef {
 public:
   ArmedGameObjDef(void);
+  int Get_Weapon_Def_ID(void) const { return WeaponDefID; }
 
   //	virtual uint32								Get_Class_ID( void ) const;
   //	virtual PersistClass *					Create( void ) const ;
