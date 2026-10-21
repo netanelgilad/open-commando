@@ -1059,7 +1059,9 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       if (buildings[p.building] !== undefined) return buildings[p.building];
       const side = /^(our|my)\b/i.test(p.building) || p.kind === 'defend' ? 'our' : 'enemy';
       const want = norm(p.building);
-      const key = Object.keys(buildings).find((k) => k.startsWith(side) && norm(k.slice(side.length)) === want) || Object.keys(buildings).find((k) => norm(k.replace(/^(our|enemy) /, '')) === want);
+      // Only the side the plan means: an attack on "the Obelisk" from Nod is
+      // no plan (GDI has none), not an attack on Nod's own.
+      const key = Object.keys(buildings).find((k) => k.startsWith(side) && norm(k.slice(side.length)) === want);
       return key ? buildings[key] : undefined;
     };
     const findPlace = (x) => (x ? placeNames.find((n) => n === x) || placeNames.find((n) => norm(n) === norm(x)) : undefined);
