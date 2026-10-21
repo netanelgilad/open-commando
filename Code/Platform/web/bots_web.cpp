@@ -39,6 +39,7 @@
 #include "wwphysids.h"
 #include "physicalgameobj.h"
 #include "basecontroller.h"
+#include "vehiclefactorygameobj.h"
 #include "sctextobj.h"
 #include "vehicle.h"
 #include "damage.h"
@@ -798,7 +799,15 @@ void Emit_State(double now) {
   for (int t = 0; t < 2; t++) {
     int team = t == 0 ? PLAYERTYPE_GDI : PLAYERTYPE_NOD;
     BaseControllerClass *base = BaseControllerClass::Find_Base(team);
-    snprintf(buf, sizeof(buf), "%s\"%s\":{\"powered\":%s", t ? "," : "", Team_Name(team), base && base->Is_Base_Powered() ? "true" : "false");
+    // The vehicle factory: one vehicle at a time (about 5 s, 10 without
+    // power), up to a vehicle limit per team.
+    const char *factory = "none";
+    BuildingGameObj *fb = base ? base->Find_Building(BuildingConstants::TYPE_VEHICLE_FACTORY) : nullptr;
+    VehicleFactoryGameObj *vf = fb && !fb->Is_Destroyed() ? fb->As_VehicleFactoryGameObj() : nullptr;
+    if (vf)
+      factory = vf->Is_Available_For_Purchase() ? "ready" : vf->Is_Busy() ? "busy" : "full";
+    snprintf(buf, sizeof(buf), "%s\"%s\":{\"powered\":%s,\"factory\":\"%s\"", t ? "," : "", Team_Name(team),
+             base && base->Is_Base_Powered() ? "true" : "false", factory);
     j += buf;
     for (int kind = 0; kind < 2; kind++) {
       j += kind == 0 ? ",\"characters\":[" : ",\"vehicles\":[";

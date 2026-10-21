@@ -95,6 +95,8 @@ static void Load_Test_Game(void);
 #include "showroom_web.h"
 #include "bots_web.h"
 
+extern bool g_is_loading; // combatgmode.cpp: a level is loading
+
 // Frames run so far (the page and run-server.mjs turn it into frames a second).
 static unsigned FrameCount = 0;
 extern "C" unsigned Rebel_Frame_Count(void) { return FrameCount; }
@@ -102,6 +104,12 @@ extern "C" unsigned Rebel_Frame_Count(void) { return FrameCount; }
 extern "C" void Rebel_Run_Pending_Actions(void) {
   FrameCount++;
   Rebel_Showroom_Run_Pending();
+  // A level loading pumps messages too (Load_Level -> Windows_Message_Handler),
+  // with the old level half released: the bots (their state reads every
+  // building and player) and console commands (bot_do...) wait until it's
+  // done. Reading a base mid-load crashed the server at each map change.
+  if (g_is_loading)
+    return;
   Rebel_Bots_Think();
   if (!PendingConsole.empty()) {
     std::vector<std::string> lines;

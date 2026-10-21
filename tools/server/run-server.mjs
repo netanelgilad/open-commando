@@ -27,6 +27,20 @@ import { createServer } from 'node:http';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const engine = resolve(here, '../..');
+// Nothing ends the server silently: print what did (game records and the
+// log are all we get from a live server).
+// A fatal error ends it, after the record is saved: a server stuck at 0 fps
+// would hold its players.
+process.on('unhandledRejection', (e) => {
+  console.log(`[fatal] unhandled rejection: ${e?.stack || e?.message || e} (${e?.constructor?.name}${e?.status !== undefined ? `, status ${e.status}` : ''})`);
+  let saved = Promise.resolve();
+  try {
+    recorder.add('fatal', { error: String(e?.stack || e).slice(0, 4000) });
+    saved = recorder.flush();
+  } catch {} // (before the recorder exists)
+  Promise.race([saved, new Promise((r) => setTimeout(r, 4000))]).finally(() => process.exit(1));
+});
+process.on('exit', (code) => console.log(`[exit] server process exiting with code ${code}`));
 const { values: opt } = parseArgs({
   options: {
     net: { type: 'string', default: process.env.REBEL_NET },
@@ -203,6 +217,8 @@ globalThis.rebelNodeModule = {
   printErr: out,
   locateFile: (p) => join(opt.bin, p),
   onAbort: (what) => { console.log(`${stamp()} [abort] ${what && what.stack || what}`); process.exit(1); },
+  // The game ending itself (exit() in the engine): say so, with where from.
+  onExit: (status) => console.log(`${stamp()} [exit] the game exited with status ${status}\n${new Error('exit').stack.split('\n').slice(2, 30).join('\n')}`),
   onRuntimeInitialized() { // `this` is the game's Module
     gameModule = this;
     // The server console: each line on stdin is a game console command.
