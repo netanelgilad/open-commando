@@ -12,6 +12,7 @@
 // bot_fill <players>, bot_list, bot_order <name|all> <attack|defend|goto x y z>,
 // bot_nav [file].
 #include "bots_web.h"
+#include "wwprofile.h"
 
 #include "consolefunction.h"
 #include "god.h"
@@ -274,6 +275,7 @@ void Order(Bot &b, SoldierGameObj *s, const Vector3 *move) {
 // Walking, every 1/4 s: the next waypoint of the path, straight at it (the
 // engine's planner can't plan on these maps); replan when stuck.
 void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
+  WWPROFILE("Bot Step");
   if (now < b.waitUntil)
     return; // holding still (maneuver "wait")
   if (b.detour) {
@@ -717,6 +719,7 @@ void Facts_Json(std::string &j) {
 }
 
 void Emit_State(double now) {
+  WWPROFILE("Bots State");
   std::string j;
   j.reserve(8192);
   char buf[256];
@@ -926,6 +929,7 @@ public:
     return "BOT_DO <id> go x y z|stop|target <obj>|shoot x y z|hold_fire|buy character|vehicle <n>|enter|jump|say team|all <text>";
   }
   void Activate(const char *input) override {
+    WWPROFILE("bot_do");
     int id = 0, n = 0;
     char verb[16] = {0};
     if (!input || sscanf(input, "%d %15s %n", &id, verb, &n) < 2)
@@ -1124,6 +1128,7 @@ void Fill_Bots(double now) {
 void Rebel_Bots_Think(void) {
   if (!cNetwork::I_Am_Server())
     return;
+  WWPROFILE("Bots Think");
   double now = emscripten_get_now();
   if (Fill > 0)
     Fill_Bots(now);

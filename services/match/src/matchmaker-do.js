@@ -161,6 +161,9 @@ export class Matchmaker extends DurableObject {
         envVars.REBEL_AI_KEY = key;
         // The model budget grows with the bots: $0.30 a bot, $2 at least.
         envVars.REBEL_AI_BUDGET_USD = String(Math.max(2, 0.3 * (match.botFill || 0)));
+        // The model mix (bot-brain.mjs modelPlan); unset, the brain's defaults.
+        if (this.env.BOT_PLANNERS) envVars.REBEL_PLANNERS = this.env.BOT_PLANNERS;
+        if (this.env.BOT_DECIDERS) envVars.REBEL_DECIDERS = this.env.BOT_DECIDERS;
       }
       await this.server(match.id).start({ envVars });
     };

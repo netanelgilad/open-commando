@@ -131,6 +131,41 @@ if (perf.length) {
   const avg = (f) => (perf.reduce((n, p) => n + (f(p) || 0), 0) / perf.length).toFixed(0);
   say(`\n== Server: fps avg ${avg((p) => p.fps)}, cpu avg ${avg((p) => p.cpu)}%, rss avg ${avg((p) => p.rss)} MB, wasm ${perf.at(-1).wasmMb} MB`);
 }
+// Models compared (when bots had different ones, see bot-brain modelPlan):
+// each planner and decider model's calls, latency, failures and cost, and
+// how its bots did (kills, deaths).
+const assigned = new Map(of('bot_models').map((x) => [x.bot, x]));
+if (assigned.size) {
+  say('\n== Models');
+  // The score at the end of the first map (a map change resets it).
+  const firstMap = snaps.filter((x) => x.map === snaps[0]?.map);
+  const end = firstMap.at(-1);
+  const score = (bots) => {
+    let k = 0, d = 0;
+    for (const p of end?.players || []) if (bots.has(p.name)) (k += p.kills), (d += p.deaths);
+    return `${k} kills / ${d} deaths`;
+  };
+  const med = (xs) => (xs.length ? xs.sort((a, b) => a - b)[xs.length >> 1] : '-');
+  const planners = [...new Set([...assigned.values()].map((x) => x.planner))];
+  for (const model of planners) {
+    const bots = new Set([...assigned.values()].filter((x) => x.planner === model).map((x) => x.bot));
+    const own = calls.filter((c) => c.model === model);
+    const fell = calls.filter((c) => c.first === model && c.model !== model);
+    const errs = errors.filter((e) => e.model === model);
+    const usd = own.reduce((n, c) => n + (c.usd ?? callUsd(c.model, c.usage)), 0);
+    const prompt = own.reduce((n, c) => n + (c.usage?.prompt_tokens || 0), 0), cached = own.reduce((n, c) => n + (c.usage?.prompt_tokens_details?.cached_tokens || 0), 0);
+    say(`planner ${model}: ${bots.size} bots, ${own.length} answers (${fell.length} of its bots' calls went elsewhere), errors ${errs.length} (${top(count(errs, (e) => (/3021|rate/i.test(e.error) ? 'rate limit' : /JSON/i.test(e.error) ? 'bad JSON' : /timeout|abort/i.test(e.error) ? 'timeout' : 'other')), 4)}), p50 ${med(own.map((c) => c.ms))} ms, ${own.length ? ((usd / own.length) * 1000).toFixed(3) : '-'} m$/answer, cached ${prompt ? Math.round((100 * cached) / prompt) : 0}%, output ${own.length ? Math.round(own.reduce((n, c) => n + (c.usage?.completion_tokens || 0), 0) / own.length) : '-'} tok; its bots: ${score(bots)}`);
+  }
+  const deciders = [...new Set([...assigned.values()].map((x) => x.decider))];
+  const fin = ai?.models?.deciders || {};
+  for (const model of deciders) {
+    const bots = new Set([...assigned.values()].filter((x) => x.decider === model).map((x) => x.bot));
+    const ds = decisions.filter((d) => d.model === model);
+    const f = fin[model] || {};
+    say(`decider ${model}: ${bots.size} bots, ${ds.length} decisions, p50 ${med(ds.map((d) => d.ms))} ms, failed ${f.failed ?? '?'}, $${f.usd ?? '?'} (${ds.length ? ((f.usd / ds.length) * 1000).toFixed(3) : '-'} m$/decision); its bots: ${score(bots)}`);
+  }
+}
+
 const fatal = of('fatal');
 if (fatal.length) say(`\n== FATAL: ${fatal[0].error.split('\n').slice(0, 6).join(' | ')}`);
 console.log(out.join('\n'));

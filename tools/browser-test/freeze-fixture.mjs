@@ -10,7 +10,7 @@
 //   node tools/browser-test/freeze-fixture.mjs [--runs 3] [--minutes 8] [--bots 32]
 //        [--map C&C_Field.mix] [--no-warmup] [--brain scripted|mock]
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -84,6 +84,9 @@ async function cpuProfile(inspector) {
 
 async function run(n) {
   const room = `freeze-${Date.now()}`;
+  // The engine's hang watchdog writes here under Node (main_web.cpp).
+  const hangLog = '/tmp/rebel-server-fixture/persist/hang.log';
+  try { rmSync(hangLog); } catch {}
   const net = `ws://127.0.0.1:${opt.port}/room/${room}`;
   const t0 = Date.now();
   const s = () => ((Date.now() - t0) / 1000).toFixed(0);
@@ -125,6 +128,8 @@ async function run(n) {
     // A map change loads for a while without [perf] lines: up to 2 min then.
     else if (!serverStall && perfSeen && Date.now() - lastPerf > (/\[load\]/.test(serverLog.slice(-20000)) ? 120000 : 30000)) {
       serverStall = { at: s(), profile: await cpuProfile(inspector) };
+      await sleep(15000); // the watchdog reports at 10 s, then every 30 s
+      try { serverStall.profile.push(...readFileSync(hangLog, 'utf8').trim().split('\n').map((l) => `watchdog: ${l}`)); } catch { serverStall.profile.push('watchdog: (no hang log)'); }
       result = 'server stalled';
     }
     if (/UNRESPONSIVE/.test(clientLog)) result = 'froze';

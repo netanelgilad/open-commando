@@ -335,107 +335,140 @@ function planPrompt(view, persona, notes, reason, options) {
 // The planner's models, tried in order: a model that fails (out of capacity,
 // too slow) is skipped for a minute; when all fail, scripted plans stand in.
 // Each has its own options (thinking off, JSON mode where it works).
-export const PLANNERS = [
-  { model: 'deepseek-v4-flash', timeoutMs: 6000, input: { response_format: { type: 'json_object' }, chat_template_kwargs: { thinking: false } } },
-  { model: 'gpt-oss-20b', timeoutMs: 8000, input: { reasoning_effort: 'low', max_tokens: 1200 } }, // its reasoning counts against max_tokens
-];
-// (llama-4-scout was third: in a full 32-player game it timed out 296 times
-// for 183 answers, each timeout a bot waiting 8 s for nothing.)
-const SKIP_FAILED_MS = 60000;
+// The planners' models and how to call each (thinking off, JSON mode where
+// it works). Bots are spread over a pool of them (REBEL_PLANNERS), each bot
+// trying its own first and the rest after: every model has its own rate
+// limit, and one game compares them on the same map, against the same
+// opponents.
+export const PLANNER_MODELS = {
+  'deepseek-v4-flash': { timeoutMs: 6000, input: { response_format: { type: 'json_object' }, chat_template_kwargs: { thinking: false } } },
+  'glm-4.7-flash': { timeoutMs: 6000, input: { response_format: { type: 'json_object' }, chat_template_kwargs: { enable_thinking: false } } },
+  'qwen3-30b': { timeoutMs: 6000, input: { response_format: { type: 'json_object' }, chat_template_kwargs: { enable_thinking: false } } }, // answers in reasoning_content
+  // (Tried, too slow for a bot: glm-5.3-flash and gemma-4-26b always think
+  // first, 6-14 s for a plan; no setting turned it off.)
+  'gpt-oss-20b': { timeoutMs: 8000, input: { reasoning_effort: 'low', max_tokens: 1200 } }, // its reasoning counts against max_tokens
+};
+// From a comparison over 3 recorded games (2840 plans): deepseek names 94%
+// of things exactly but times out under load; qwen3-30b answers in 1.2 s,
+// fails 1%, costs a third, names 57% exactly (near misses resolve). So bots
+// are split between the two; glm-4.7-flash (rarely attacks, chats 92% of the
+// time) and gpt-oss-20b (39% exact, dearest) only stand in.
+export const DEFAULT_PLANNERS = 'deepseek-v4-flash,qwen3-30b|glm-4.7-flash,gpt-oss-20b';
+export const DEFAULT_DECIDERS = 'clef-flash:30,clef-omni:2'; // a couple on clef-omni to keep comparing
+// (llama-4-scout was a fallback: in a full 32-player game it timed out 296
+// times for 183 answers, each timeout a bot waiting 8 s for nothing.)
+const SKIP_FAILED_MS = 60000; // a model that errors
+const SKIP_SLOW_MS = 15000; // a model that timed out: often just one slow answer
 // Workers AI's per-minute request limit (error 3021, seen when a whole team
 // respawns at once) is a burst, not an outage: that call waits a moment and
-// tries the same model again (it has the prompt cached; the fallbacks don't,
-// so they cost more), and the model is not skipped.
+// tries the same model again (it may have the prompt cached), and the model
+// is not skipped.
 const RATE_LIMITED = /3021|rate limit/i;
 const RATE_RETRIES = 2;
-// The first model's request rate adapts to the limit it reports: on a 3021
-// the allowed rate drops to what got through in the last minute (a bit
-// under), and climbs back by RATE_STEP each quiet minute. Above it, routine
-// re-plans wait (the bot keeps its plans); plans for events (spawn, death,
-// chat, rethink) wait a moment for a slot, then take the next model.
+// Each model's request rate adapts to the limit it reports: on a 3021 the
+// allowed rate drops to what got through in the last minute (a bit under),
+// and climbs back by RATE_STEP each quiet minute. With the bot's own model
+// at its limit, routine re-plans wait (the bot keeps its plans); plans for
+// events (spawn, death, chat, rethink) take the next model in its chain.
 const RATE_STEP = 2;
-const EVENT_WAIT_MS = 3000;
 
 export function llmPlanner(ai, stats, rec = () => {}) {
   const skipUntil = {};
-  const sent = []; // when requests went to the first model (last minute)
-  const ok = []; // when it answered
-  let allowed = Infinity, raisedAt = 0;
+  const limits = {}; // model -> { sent: [times], ok: [times], allowed, raisedAt }
   const lastMinute = (list) => {
     while (list.length && list[0] < Date.now() - 60000) list.shift();
     return list.length;
   };
-  const slotFree = () => {
-    if (allowed !== Infinity && Date.now() - raisedAt > 60000) {
-      allowed += RATE_STEP;
-      raisedAt = Date.now();
+  const limit = (model) => (limits[model] ??= { sent: [], ok: [], allowed: Infinity, raisedAt: 0 });
+  const slotFree = (model) => {
+    const l = limit(model);
+    if (l.allowed !== Infinity && Date.now() - l.raisedAt > 60000) {
+      l.allowed += RATE_STEP;
+      l.raisedAt = Date.now();
     }
-    return lastMinute(sent) < allowed;
+    return lastMinute(l.sent) < l.allowed;
   };
+  const per = (model) => (stats.models ??= {})[model] ??= { calls: 0, failed: 0, limited: 0, badJson: 0, ms: [], usd: 0, prompt: 0, cached: 0 };
   const planner = async (view, persona, notes, reason, options) => {
-    if (!slotFree()) {
-      if (options.routine) {
-        stats.deferred = (stats.deferred || 0) + 1;
-        return { deferred: true };
-      }
-      const until = Date.now() + EVENT_WAIT_MS;
-      while (!slotFree() && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
+    const chain = (options.models?.length ? options.models : ['deepseek-v4-flash', 'qwen3-30b', 'gpt-oss-20b']).filter((m) => PLANNER_MODELS[m]);
+    if (!slotFree(chain[0]) && options.routine) {
+      stats.deferred = (stats.deferred || 0) + 1;
+      return { deferred: true };
     }
     const prompt = planPrompt(view, persona, notes, reason, options);
-    // The playbook first, the same for every call of this team on this map
-    // (cacheable); the situation after it.
+    // The playbook first, the same for every call on this map (cacheable);
+    // the situation after it.
     const messages = [...(options.playbook ? [{ role: 'system', content: options.playbook }] : []), { role: 'user', content: prompt }];
-    for (let k = 0, tries = 0; k < PLANNERS.length; k++) {
-      const p = PLANNERS[k];
-      if (Date.now() < (skipUntil[p.model] || 0)) continue;
-      if (k === 0 && !slotFree()) continue;
-      if (k === 0) sent.push(Date.now());
+    for (let k = 0, tries = 0; k < chain.length; k++) {
+      const model = chain[k], p = PLANNER_MODELS[model], m = per(model);
+      if (Date.now() < (skipUntil[model] || 0) || !slotFree(model)) continue;
+      limit(model).sent.push(Date.now());
       const t0 = Date.now();
       try {
         const res = await fetch(ai.url, {
           method: 'POST',
           headers: { authorization: `Bearer ${ai.key}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ model: p.model, affinity: options.playbookKey ? `pb-${options.playbookKey.replace(/[^\w.-]+/g, '_')}`.slice(0, 64) : undefined, input: { messages, max_tokens: 400, temperature: 0.8, ...p.input } }),
+          body: JSON.stringify({ model, affinity: options.playbookKey ? `pb-${options.playbookKey.replace(/[^\w.-]+/g, '_')}`.slice(0, 64) : undefined, input: { messages, max_tokens: 400, temperature: 0.8, ...p.input } }),
           signal: AbortSignal.timeout(p.timeoutMs),
         });
         const body = await res.json();
-        const text = body.output?.choices?.[0]?.message?.content;
+        const msg = body.output?.choices?.[0]?.message;
+        const text = msg?.content ?? msg?.reasoning_content ?? body.output?.response;
         if (!res.ok || !text) throw new Error(body.error || `HTTP ${res.status}, no content`);
-        const answer = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
-        rec('planner_call', { bot: view.me.name, model: p.model, ms: Date.now() - t0, usage: body.output.usage, reason, playbook: options.playbookKey, prompt, reply: text });
+        let answer;
+        try {
+          answer = typeof text === 'object' ? text : JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+        } catch (e) {
+          m.badJson++;
+          throw e;
+        }
+        const usage = body.output.usage || {};
+        const usd = callUsd(model, usage);
+        rec('planner_call', { bot: view.me.name, model, first: chain[0], ms: Date.now() - t0, usage, usd, reason, playbook: options.playbookKey, prompt, reply: typeof text === 'string' ? text : JSON.stringify(text) });
         stats.calls++;
         stats.ms.push(Date.now() - t0);
-        stats.tokens += body.output.usage?.total_tokens || 0;
-        stats.usd = (stats.usd || 0) + callUsd(p.model, body.output.usage);
-        stats.cached = (stats.cached || 0) + (body.output.usage?.prompt_tokens_details?.cached_tokens ?? body.output.usage?.cached_tokens ?? 0);
-        stats.prompt = (stats.prompt || 0) + (body.output.usage?.prompt_tokens || 0);
-        stats.by[p.model] = (stats.by[p.model] || 0) + 1;
-        if (k === 0) ok.push(Date.now());
-        stats.allowedPerMin = allowed === Infinity ? null : allowed;
+        stats.tokens += usage.total_tokens || 0;
+        stats.usd = (stats.usd || 0) + usd;
+        const cached = usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0;
+        stats.cached = (stats.cached || 0) + cached;
+        stats.prompt = (stats.prompt || 0) + (usage.prompt_tokens || 0);
+        stats.by[model] = (stats.by[model] || 0) + 1;
+        m.calls++;
+        m.ms.push(Date.now() - t0);
+        if (m.ms.length > 200) m.ms.shift();
+        m.usd += usd;
+        m.prompt += usage.prompt_tokens || 0;
+        m.cached += cached;
+        limit(model).ok.push(Date.now());
         return answer;
       } catch (e) {
+        const err = String(e.message || e);
         stats.failed++;
-        stats.lastError = `${p.model}: ${String(e.message || e).slice(0, 120)}`;
-        rec('planner_error', { bot: view.me.name, model: p.model, ms: Date.now() - t0, error: String(e.message || e).slice(0, 300) });
-        if (k === 0 && RATE_LIMITED.test(String(e.message || e))) {
-          allowed = Math.max(1, Math.floor(lastMinute(ok) * 0.9));
-          raisedAt = Date.now();
-          stats.allowedPerMin = allowed;
-        }
-        (stats.errors ??= {})[p.model] = stats.lastError;
-        if (RATE_LIMITED.test(String(e.message || e)) && tries < RATE_RETRIES) {
-          stats.rateLimited = (stats.rateLimited || 0) + 1;
-          tries++;
-          await new Promise((r) => setTimeout(r, 1000 + Math.random() * 3000));
-          k--; // the same model again
+        m.failed++;
+        stats.lastError = `${model}: ${err.slice(0, 120)}`;
+        rec('planner_error', { bot: view.me.name, model, first: chain[0], ms: Date.now() - t0, error: err.slice(0, 300) });
+        (stats.errors ??= {})[model] = stats.lastError;
+        if (RATE_LIMITED.test(err)) {
+          m.limited++;
+          const l = limit(model);
+          l.allowed = Math.max(1, Math.floor(lastMinute(l.ok) * 0.9));
+          l.raisedAt = Date.now();
+          if (tries < RATE_RETRIES && k === chain.length - 1) {
+            // The last model left: wait a moment and try it again.
+            tries++;
+            await new Promise((r) => setTimeout(r, 1000 + Math.random() * 3000));
+            k--;
+          }
           continue;
         }
         tries = 0;
-        skipUntil[p.model] = Date.now() + SKIP_FAILED_MS;
+        skipUntil[model] = Date.now() + (/timeout|aborted/i.test(err) ? SKIP_SLOW_MS : SKIP_FAILED_MS);
       }
     }
     return null;
   };
+  // What each model's limiter allows now (for the status line).
+  planner.limits = () => Object.fromEntries(Object.entries(limits).map(([k, l]) => [k, l.allowed === Infinity ? null : l.allowed]));
   return planner;
 }
 
@@ -487,14 +520,18 @@ const cleanSay = (t) => String(t || '').replace(/[\u2013\u2014]/g, ' - ').replac
 // A call that fails or takes too long gets the scripted answers instead, so a
 // bot never waits on the model.
 const CLEF_TIMEOUT_MS = 2500; // big games: Workers AI slows down with many calls in flight
+// Clef models, per bot (REBEL_DECIDERS): the same typed questions to each.
+export const DECIDER_MODELS = ['clef-flash', 'clef-omni', 'clef'];
 function clefDecider(ai, stats) {
-  return async (state, questions) => {
+  const per = (model) => (stats.models ??= {})[model] ??= { calls: 0, failed: 0, ms: [], usd: 0 };
+  return async (state, questions, model = 'clef-flash') => {
     const t0 = Date.now();
+    const m = per(model);
     try {
       const res = await fetch(ai.url, {
         method: 'POST',
         headers: { authorization: `Bearer ${ai.key}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'clef-flash', input: { state, questions } }),
+        body: JSON.stringify({ model, input: { state, questions } }),
         signal: AbortSignal.timeout(CLEF_TIMEOUT_MS),
       });
       const body = await res.json();
@@ -502,7 +539,12 @@ function clefDecider(ai, stats) {
       stats.calls++;
       stats.ms.push(Date.now() - t0);
       stats.tokens += body.output.usage?.input_tokens || 0;
-      stats.usd = (stats.usd || 0) + callUsd('clef-flash', body.output.usage);
+      const usd = callUsd(model, body.output.usage);
+      stats.usd = (stats.usd || 0) + usd;
+      m.calls++;
+      m.ms.push(Date.now() - t0);
+      if (m.ms.length > 500) m.ms.shift();
+      m.usd += usd;
       const answers = {};
       for (const [id, a] of Object.entries(body.output.answers)) {
         answers[id] = a.type === 'noul' ? { probability: a.noul } : { choice: a.choice, probabilities: a.probabilities, confidence: a.confidence };
@@ -510,7 +552,8 @@ function clefDecider(ai, stats) {
       return answers;
     } catch (e) {
       stats.failed++;
-      stats.lastError = String(e.message || e);
+      m.failed++;
+      stats.lastError = `${model}: ${String(e.message || e)}`;
       return null;
     }
   };
@@ -527,6 +570,12 @@ const CALLOUTS = {
 // output), for the spend shown in game and the per-match budget.
 const PRICES = {
   'clef-flash': [0.038, 0.038, 0],
+  'clef-omni': [0.15, 0.15, 0],
+  clef: [0.24, 0.24, 0.1],
+  'glm-5.3-flash': [0.15, 0.03, 0.5],
+  'glm-4.7-flash': [0.06, 0.06, 0.4],
+  'qwen3-30b': [0.051, 0.051, 0.335],
+  'gemma-4-26b': [0.1, 0.1, 0.3],
   'deepseek-v4-flash': [0.44, 0.014, 1.32],
   'gpt-oss-20b': [0.2, 0.2, 0.3],
   'llama-4-scout': [0.27, 0.27, 0.85],
@@ -539,7 +588,33 @@ export function callUsd(model, usage = {}) {
   return ((prompt - hit) * inp + hit * cached + (usage.completion_tokens ?? usage.output_tokens ?? 0) * out) / 1e6;
 }
 
-export function createBrain({ mode = 'scripted', send: sendCommand, record: rec = () => {}, out = console.log, ai = null, budgetUsd = 2 }) {
+// Models for each bot: the planner pool, round robin (each bot's chain is
+// its own model, then the rest of the pool), and the decider mix, weighted
+// ("clef-flash:26,clef-omni:3,clef:3"), spread evenly over the join order so
+// both teams get some of each.
+export function modelPlan(planners = DEFAULT_PLANNERS, deciders = 'clef-flash') {
+  // "a,b|c,d": bots are spread over a and b; c and d only stand in.
+  const spec = Array.isArray(planners) ? planners.join(',') : String(planners);
+  const [primary, standby = ''] = spec.split('|');
+  const names = (x) => x.split(',').map((m) => m.trim()).filter((m) => PLANNER_MODELS[m]);
+  const pool = names(primary).length ? names(primary) : DEFAULT_PLANNERS;
+  const fallbacks = names(standby);
+  const mix = String(deciders).split(',').map((x) => x.trim().split(':')).filter(([m]) => DECIDER_MODELS.includes(m)).map(([m, w]) => [m, Math.max(0, +(w ?? 1) || 1)]);
+  const total = mix.reduce((n, [, w]) => n + w, 0) || 1;
+  // Evenly spread: the k-th bot takes the model whose share is most behind.
+  const given = Object.fromEntries(mix.map(([m]) => [m, 0]));
+  let k = 0;
+  return () => {
+    const i = k++;
+    const decider = mix.length ? mix.map(([m, w]) => [m, (w / total) * (i + 1) - given[m]]).sort((a, b) => b[1] - a[1])[0][0] : 'clef-flash';
+    given[decider] = (given[decider] || 0) + 1;
+    const own = pool[i % pool.length];
+    return { planners: [...new Set([own, ...pool, ...fallbacks, 'gpt-oss-20b'])], decider };
+  };
+}
+
+export function createBrain({ mode = 'scripted', send: sendCommand, record: rec = () => {}, out = console.log, ai = null, budgetUsd = 2, planners = DEFAULT_PLANNERS, deciders = DEFAULT_DECIDERS }) {
+  const nextModels = modelPlan(planners, deciders);
   // Every command the bots get goes into the record too.
   const send = (line) => {
     rec('command', { line });
@@ -648,7 +723,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   function blackboard(id) {
     let b = bots.get(id);
     if (!b) {
-      b = { plans: [], orders: [], current: null, planText: '', nextDecide: 0, nextPlan: 0, lastSay: 0, sent: {}, events: [], last: null, notes: [], persona: PERSONAS[personaIndex++ % PERSONAS.length], planning: false, why: 'you just joined the match' };
+      b = { plans: [], orders: [], current: null, planText: '', nextDecide: 0, nextPlan: 0, lastSay: 0, sent: {}, events: [], last: null, notes: [], persona: PERSONAS[personaIndex++ % PERSONAS.length], planning: false, why: 'you just joined the match', models: nextModels() };
       bots.set(id, b);
     }
     return b;
@@ -965,7 +1040,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   async function planWithModel(id, bb, state, why, routine = false) {
     const buildings = {}, placeNames = places.filter((p) => !p.building).map((p) => p.name);
     for (const b of world.buildings) if (b.team !== 'none' && b.hp > 0) buildings[`${b.team === state.me.team ? 'our' : 'enemy'} ${buildingName(b)}`] = b.id;
-    const answer = await planner(state, bb.persona, bb.notes, why, { buildings: Object.keys(buildings), places: placeNames, orders: bb.orders, saving: bb.saveFor, routine, ...playbookFor() });
+    const answer = await planner(state, bb.persona, bb.notes, why, { buildings: Object.keys(buildings), places: placeNames, orders: bb.orders, saving: bb.saveFor, routine, models: bb.models.planners, ...playbookFor() });
     if (bb.team !== state.me.team) return; // it changed sides while the model thought
     if (answer?.deferred) {
       bb.nextPlan = Date.now() + 8000 + Math.random() * 8000; // its plans stand; try again soon
@@ -1040,6 +1115,10 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       bb.wantPlan = true;
     }
     bb.team = me.team;
+    if (bb.modelsFor !== me.name) {
+      bb.modelsFor = me.name;
+      rec('bot_models', { bot: me.name, team: me.team, planner: bb.models.planners[0], chain: bb.models.planners, decider: bb.models.decider });
+    }
     // Life events, from the scoreboard.
     if (bb.last) {
       if (me.deaths > bb.last.deaths) bb.events.push(`you died ${placeOf(places, bb.last.pos)}`), (bb.why = 'you just died');
@@ -1096,7 +1175,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const quiet = !state.enemies_in_sight.length && !(state.alerts || []).length && !state.stuck;
     const key = quiet && JSON.stringify([Object.keys(questions).sort(), Object.values(questions).map((q) => Object.keys(q.criteria || {})), state.me.place, Math.round(state.me.health * 4), state.events.length, (state.chat || []).length, bb.plans.map((p) => p.id), bb.current]);
     const reuse = quiet && key === bb.quietKey && Date.now() - bb.quietAt < QUIET_REUSE_MS && bb.lastDecided;
-    const decided = reuse ? bb.lastDecided : model && withinBudget() ? await model(modelState, questions) : null;
+    const decided = reuse ? bb.lastDecided : model && withinBudget() ? await model(modelState, questions, bb.models.decider) : null;
     if (decided && !reuse) {
       bb.lastDecided = decided;
       bb.quietKey = key;
@@ -1114,7 +1193,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       bb.why = 'your reflexes say something happened that your plans do not cover';
     }
     act(bot, me, state, bb, answers, objectiveOf(bb.plans.find((p) => p.id === answers.plan?.choice) || plan, me, bb));
-    rec('decision', { bot: me.name, team: me.team, by, ms, ...(reuse ? {} : { state: modelState, questions }), answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.probabilities ?? a.probability])) });
+    rec('decision', { bot: me.name, team: me.team, by, model: by === 'clef' ? bb.models.decider : undefined, ms, ...(reuse ? {} : { state: modelState, questions }), answers: Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.probabilities ?? a.probability])) });
   }
 
   function tick() {
@@ -1143,10 +1222,18 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     }
   }
 
-  out(`[brain] ${mode} brain for the bots`);
+  // Per model: calls, failures, median latency, spend.
+  function summary(models = {}) {
+    return Object.fromEntries(Object.entries(models).map(([k, m]) => {
+      const ms = [...m.ms].sort((a, b) => a - b);
+      return [k, { calls: m.calls, failed: m.failed, ...(m.limited !== undefined ? { limited: m.limited, badJson: m.badJson } : {}), p50: ms[ms.length >> 1] || null, usd: +m.usd.toFixed(4) }];
+    }));
+  }
+
+  out(`[brain] ${mode} brain for the bots${mode === 'hybrid' || mode === 'clef' ? `; planners ${planners}; deciders ${deciders}` : ''}`);
   return {
     // The models' spend so far (the page shows it during a match).
-    usage: () => ({ usd: +spent().toFixed(4), budgetUsd, decisions: stats.calls, plans: planStats.calls, planners: planStats.by, cachedShare: planStats.prompt ? +(planStats.cached / planStats.prompt).toFixed(2) : null }),
+    usage: () => ({ usd: +spent().toFixed(4), budgetUsd, decisions: stats.calls, plans: planStats.calls, planners: planStats.by, cachedShare: planStats.prompt ? +(planStats.cached / planStats.prompt).toFixed(2) : null, models: { planners: summary(planStats.models), deciders: summary(stats.models) }, limits: planner?.limits?.() }),
     onState(json) {
       const map = world?.map;
       const before = world;

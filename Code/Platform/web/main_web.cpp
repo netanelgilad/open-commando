@@ -22,6 +22,7 @@
 #include <thread>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -65,7 +66,17 @@ extern "C" const char *volatile Rebel_Phase;
 // for 10 s, report where it is (the engine's WWPROFILE scope chain, read
 // racily) from this thread, which keeps running while the main thread is
 // stuck. Reports again every 30 s while the stall lasts.
+// Under Node (the dedicated server) a worker's console output goes through
+// the main thread: with the main thread stuck, the report never shows. So it
+// also goes to a file (/opfs/persist/hang.log: the host directory's
+// persist/hang.log), written with plain write() on a file opened up front:
+// no allocation, nothing the stuck thread could be holding.
+static int Hang_Log = -1;
+static bool On_Node = false;
+
 static void Hang_Watchdog() {
+  if (On_Node)
+    Hang_Log = open("/opfs/persist/hang.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
   unsigned last = Rebel_Heartbeat;
   double since = emscripten_get_now(); // when the heartbeat last changed
   double next_report = 10000.0;        // ms of stall before the (next) report
@@ -99,6 +110,11 @@ static void Hang_Watchdog() {
       snprintf(line, sizeof(line), "[hang] main thread stuck for %.0f s; last step: %s; scopes: %s", stalled / 1000.0,
                Rebel_Phase, chain);
       emscripten_console_error(line);
+      if (Hang_Log >= 0) {
+        size_t n = strlen(line);
+        line[n++] = '\n';
+        (void)!write(Hang_Log, line, n);
+      }
     }
   }
 }
@@ -110,7 +126,8 @@ int main(int argc, char **argv) {
     if (strncmp(argv[i], "--root=", 7) == 0)
       host_root = argv[i] + 7;
   int mount_result = -1;
-  if (host_root && EM_ASM_INT({ return typeof process === 'object' && !!process.versions && !!process.versions.node; })) {
+  On_Node = EM_ASM_INT({ return typeof process === 'object' && !!process.versions && !!process.versions.node; });
+  if (host_root && On_Node) {
     mount_result = wasmfs_create_directory("/opfs", 0777, wasmfs_create_node_backend(host_root));
   } else {
     // The OPFS backend spawns its own proxy worker, which may not be started

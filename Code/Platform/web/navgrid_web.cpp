@@ -9,6 +9,7 @@
 // Two grids: soldiers (1 m cells, doors linked through their centers) and
 // vehicles (2 m cells, a tank-sized box, no doors).
 #include "navgrid_web.h"
+#include "wwprofile.h"
 
 #include "combat.h"
 #include "gamedata.h"
@@ -499,6 +500,7 @@ bool Off_Tiberium(const Vector3 &p, Vector3 &out) {
 
 int Node_Count(Kind k) { return For(k).Ready() ? (int)For(k).Nodes.size() : 0; }
 bool Find_Path(Kind k, const Vector3 &from, const Vector3 &to, std::vector<Vector3> &path) {
+  WWPROFILE("Find Path");
   if (k == VEHICLE && !Vehicles.Ready())
     k = SOLDIER; // not built yet: the soldiers' grid will do
   return For(k).Find_Path(from, to, path);

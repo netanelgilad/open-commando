@@ -205,7 +205,11 @@ if (opt['bot-brain'] !== 'off') {
   const { createBrain } = await import('./bot-brain.mjs');
   const ai = process.env.REBEL_AI_URL && { url: process.env.REBEL_AI_URL, key: process.env.REBEL_AI_KEY };
   const budgetUsd = +(process.env.REBEL_AI_BUDGET_USD || 2); // per server (one match)
-  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), record: recorder.add, out, ai, budgetUsd });
+  // The models, per bot (bot-brain.mjs modelPlan): REBEL_PLANNERS a pool
+  // ("deepseek-v4-flash,glm-5.3-flash"), REBEL_DECIDERS a weighted Clef mix.
+  const planners = process.env.REBEL_PLANNERS || undefined; // "a,b|c,d": spread over a and b, c and d stand in
+  const deciders = process.env.REBEL_DECIDERS || undefined;
+  brain = createBrain({ mode: opt['bot-brain'], send: (line) => console_(line), record: recorder.add, out, ai, budgetUsd, planners, deciders });
 }
 
 globalThis.rebelNodeModule = {
@@ -223,6 +227,10 @@ globalThis.rebelNodeModule = {
     gameModule = this;
     // The server console: each line on stdin is a game console command.
     createInterface({ input: process.stdin }).on('line', (line) => {
+      // Test hook: block the main thread natively for <s> seconds (a stand-in
+      // for a deadlock), to check the hang watchdog still reports.
+      const block = /^!block (\d+)$/.exec(line.trim());
+      if (block) return Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, +block[1] * 1000);
       if (line.trim()) console_(line.trim());
     });
     this.callMain([`--root=${root}`, 'STARTSERVER=server.ini', 'NODX']);
