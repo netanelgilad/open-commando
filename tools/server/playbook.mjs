@@ -28,6 +28,7 @@ Credits: a steady trickle from the refinery plus a share for damage dealt; kept 
 What works:
 - Never walk alone into a defended base; the defense out-ranges and out-damages any single unit. Go with 3+ teammates, from cover, by the routes the defense can't see.
 - Take out the base defense first, or the Power Plant (that turns the defense off), then the rest falls fast.
+- Finish what's damaged: the whole team on the one most damaged enemy building beats damage spread over many; a building at half health left alone just stays at half.
 - Tanks in a group with an engineer repairing them beat a defense; a lone tank dies.
 - An APC carries infantry to a building's door; hold the inside, hit the MCT.
 - Long-range units (artillery, rocket launchers) can hit buildings from outside the defense's reach; guard them.

@@ -27,6 +27,7 @@ const QUIET_REUSE_MS = 5000;
 // its credits for this long at most, then may spend again. Without saving,
 // bots bought a 150-225 credit character every life and never a tank.
 const SAVE_FOR_MS = 6 * 60000;
+const FOCUS_BELOW = 0.8; // an enemy building under this health is everyone's target
 
 // Names of things as players say them.
 const BUILDING_NAMES = [
@@ -164,7 +165,10 @@ function squadObjective(teams, sq, world, places) {
   const k = Math.max(0, same.indexOf(sq));
   let o = null;
   if ((sq.role === 'assault' || sq.role === 'flanker') && theirs.length) {
-    const b = theirs[(k + (sq.role === 'flanker' ? 1 : 0)) % theirs.length];
+    // A damaged enemy building draws every attack (finish it: spread
+    // damage never brought one down; a Guard Tower sat at 46% for 10 min).
+    const focus = theirs[0].hp < FOCUS_BELOW ? theirs[0] : null;
+    const b = focus || theirs[(k + (sq.role === 'flanker' ? 1 : 0)) % theirs.length];
     o = { kind: 'attack', building: b.id, text: `${sq.role === 'flanker' ? 'flank and hit' : 'attack'} the enemy ${buildingName(b)}` };
     if (sq.role === 'flanker') {
       // A point well off the line between the bases, alternating sides.
@@ -294,7 +298,8 @@ function buildingsLine(s) {
   const label = (b) => `${b.side === 'ours' ? 'our' : 'enemy'} ${b.name}`;
   const up = s.buildings.filter((b) => b.health !== '0%');
   const down = s.buildings.filter((b) => b.health === '0%');
-  return `Targets (buildings, health): ${up.map((b) => `${label(b)} ${b.health}`).join(', ')}.${down.length ? ` Destroyed: ${down.map(label).join(', ')}.` : ''}`;
+  const finish = (b) => b.side !== 'ours' && parseInt(b.health) < FOCUS_BELOW * 100 ? ' (damaged: finish it)' : '';
+  return `Targets (buildings, health): ${up.map((b) => `${label(b)} ${b.health}${finish(b)}`).join(', ')}.${down.length ? ` Destroyed: ${down.map(label).join(', ')}.` : ''}`;
 }
 
 // How to answer: the same for every call, so it goes with the playbook (the
@@ -961,6 +966,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const buildings = {}, placeNames = places.filter((p) => !p.building).map((p) => p.name);
     for (const b of world.buildings) if (b.team !== 'none' && b.hp > 0) buildings[`${b.team === state.me.team ? 'our' : 'enemy'} ${buildingName(b)}`] = b.id;
     const answer = await planner(state, bb.persona, bb.notes, why, { buildings: Object.keys(buildings), places: placeNames, orders: bb.orders, saving: bb.saveFor, routine, ...playbookFor() });
+    if (bb.team !== state.me.team) return; // it changed sides while the model thought
     if (answer?.deferred) {
       bb.nextPlan = Date.now() + 8000 + Math.random() * 8000; // its plans stand; try again soon
       return;
@@ -1014,13 +1020,22 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
 
   async function think(bot, me, now) {
     const bb = blackboard(bot.id);
-    // Teams are remixed at a map change: new side, new plans.
+    // A new side (teams remixed at a map change, or the slot refilled on the
+    // other team when the server rebalances): nothing of the old side's
+    // stands, or the bot "attacks" its own buildings.
     if (bb.team && bb.team !== me.team) {
       bb.plans = [];
       bb.current = null;
       bb.sent = {};
       bb.goTo = null;
       bb.notes = [];
+      bb.orders = [];
+      bb.rally = {};
+      bb.saveFor = null;
+      bb.lastDecided = null;
+      bb.quietKey = null;
+      bb.wantVehicle = null;
+      bb.events = [];
       bb.why = `teams were remixed: you are on ${me.team} now`;
       bb.wantPlan = true;
     }
