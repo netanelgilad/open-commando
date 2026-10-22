@@ -40,7 +40,10 @@ const PUSH_MS = 45000; // a team push stays open this long for others to join
 // building is within 58 m of it. Firing positions stay outside this.
 const DEFENSE_REACH_M = 75;
 const SIEGE_KEEP_OUT_M = DEFENSE_REACH_M + 5;
-const ATTACK_RANGE_M = 80; // the engine's attack range for a shot at a point (bots_web.cpp Order)
+// Where shots at buildings actually land: in two recorded games every hit
+// came from 23-62 m (median 33); a tank in a test hit from 40 m and didn't
+// fire at all from 60. Siege positions are this close to the target.
+const SIEGE_NEAR_M = 25, SIEGE_FAR_M = 40;
 const RALLY_NEED_DEFENDED = 6; // into a defense's reach: enough to overwhelm it (the Obelisk needs ~3.3 s a kill)
 const STUCK_VEHICLE_MS = 30000; // a driver that moved < 8 m in this long with somewhere to go gets out
 
@@ -183,7 +186,11 @@ function squadObjective(teams, sq, world, places) {
     // A damaged enemy building draws every attack (finish it: spread
     // damage never brought one down; a Guard Tower sat at 46% for 10 min).
     const focus = theirs[0].hp < FOCUS_BELOW ? theirs[0] : null;
-    const b = focus || theirs[(k + (sq.role === 'flanker' ? 1 : 0)) % theirs.length];
+    // Their base defense first while it stands (on Field every Nod building
+    // is within the Obelisk's reach; it did half of all kills): assault
+    // squads go for it, flankers keep to the other buildings.
+    const defense = sq.role === 'assault' && theirs.find((x) => /obelisk|guard_tower|agt/i.test(x.name));
+    const b = focus || defense || theirs[(k + (sq.role === 'flanker' ? 1 : 0)) % theirs.length];
     o = { kind: 'attack', building: b.id, text: `${sq.role === 'flanker' ? 'flank and hit' : 'attack'} the enemy ${buildingName(b)}` };
     if (sq.role === 'flanker') {
       // A point well off the line between the bases, alternating sides.
@@ -943,6 +950,21 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
 
   // A team's open push (a rally that went): others join it (see rallyFor).
   const teamPush = {}; // team -> { building, at, by }
+  // The map's walking grid (bots_web.cpp sends it once a map): walkable cells.
+  let grid = null;
+  function setGrid(g) {
+    const cells = new Uint8Array(g.nx * g.ny);
+    g.rows.forEach((row, y) => {
+      let x = 0;
+      for (const m of row.matchAll(/([#.~!])(\d+)/g)) for (let k = 0; k < +m[2]; k++, x++) cells[y * g.nx + x] = m[1] === '.' || m[1] === '!' ? 1 : 0;
+    });
+    grid = { ...g, cells };
+  }
+  const walkable = (p) => {
+    if (!grid) return true;
+    const x = Math.floor((p[0] - grid.minX) / grid.cell), y = Math.floor((p[1] - grid.minY) / grid.cell);
+    return x >= 0 && y >= 0 && x < grid.nx && y < grid.ny && grid.cells[y * grid.nx + x] === 1;
+  };
   const hasWeapon = (bot, kinds) => (bot?.weapons || []).some(([k, n]) => kinds.includes(k) && n !== 0);
   // Live enemy base defenses of a team (Obelisk, Guard Tower).
   const defensesOf = (team) => world.buildings.filter((x) => x.team === team && x.hp > 0 && /obelisk|guard_tower|agt/i.test(x.name));
@@ -951,18 +973,19 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   // line from b toward our base, the nearest point that's clear. None if
   // the weapon is too short for that (then it's a push into the defense).
   function siegeSpot(me, b, range) {
-    const reach = Math.min(range * 0.9, ATTACK_RANGE_M);
+    if (range < SIEGE_NEAR_M) return null;
     const defenses = defensesOf(b.team);
     if (!defenses.length) return null;
-    const home = places.find((p) => p.base && p.team === me.team)?.pos;
-    if (!home) return null;
-    const dir = [home[0] - b.pos[0], home[1] - b.pos[1]];
-    const len = Math.hypot(dir[0], dir[1]) || 1;
-    for (let d = 15; d <= reach; d += 5) {
-      const at = [b.pos[0] + (dir[0] / len) * d, b.pos[1] + (dir[1] / len) * d, b.pos[2]];
-      if (defenses.every((x) => dist(at, x.pos) >= SIEGE_KEEP_OUT_M)) return at;
-    }
-    return null;
+    // Around the building, 25-40 m out, on walkable ground (the map's
+    // grid), outside every live defense's reach: the one nearest to us.
+    let best = null;
+    for (let r = SIEGE_NEAR_M; r <= Math.min(SIEGE_FAR_M, range); r += 5)
+      for (let a = 0; a < 360; a += 15) {
+        const at = [b.pos[0] + r * Math.cos((a * Math.PI) / 180), b.pos[1] + r * Math.sin((a * Math.PI) / 180), b.pos[2]];
+        if (!walkable(at) || !defenses.every((x) => dist(at, x.pos) >= SIEGE_KEEP_OUT_M)) continue;
+        if (!best || dist(me.pos, at) < dist(me.pos, best)) best = at;
+      }
+    return best;
   }
   const rangeOf = (me) => {
     const preset = me.vehicle ? world.vehicles.find((x) => x.id === me.vehicle)?.name : me.char;
@@ -1113,7 +1136,9 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     // What to shoot. At a building: its MCT when close (it counts double),
     // else the building.
     const xyz = (p, up = 0) => `${p[0].toFixed(1)} ${p[1].toFixed(1)} ${(p[2] + up).toFixed(1)}`;
-    const aimAt = (b) => (b.mct && dist(me.pos, b.mct) < MCT_AIM_M ? xyz(b.mct, 0.5) : xyz(b.pos, 2));
+    // (Not from a vehicle: the walls around an MCT block a turret; a tank
+    // aimed at one fired once in 20 s, at the building 15 times.)
+    const aimAt = (b) => (b.mct && !me.vehicle && dist(me.pos, b.mct) < MCT_AIM_M ? xyz(b.mct, 0.5) : xyz(b.pos, 2));
     const t = answers.target?.choice || 'none';
     const bld = t.startsWith('bld_') && world.buildings.find((x) => x.id === +t.slice(4));
     const objBld = objective?.building && world.buildings.find((x) => x.id === objective.building && x.team !== me.team);
@@ -1463,6 +1488,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
         return;
       }
       world = next;
+      if (world.grid) setGrid(world.grid);
       if (world.facts) {
         facts = world.facts; // the weapons' numbers on this map, sent once
         playbookCache.clear();

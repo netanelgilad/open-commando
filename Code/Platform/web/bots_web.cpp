@@ -36,6 +36,7 @@
 #include "weaponmanager.h"
 #include "weaponbag.h"
 #include "c4.h"
+#include "objlibrary.h"
 #include "explosion.h"
 #include "combatchunkid.h"
 #include "mapmgr.h"
@@ -417,7 +418,7 @@ public:
           (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck, b.accepted ? "taken" : "refused",
           b.shootAt ? ", shooting a point" : b.targetId ? ", shooting a target" : "", rounds);
       if (s && s->Get_Weapon_Bag()) { // what it carries: kind:rounds, the one in hand first
-        std::string w = std::string("  in hand ") + Weapon_Kind(s->Get_Weapon()) +
+        std::string w = std::string(s->Get_Vehicle() ? "  driving " + std::string(s->Get_Vehicle()->Get_Definition().Get_Name()) + " (fired " + std::to_string(s->Get_Vehicle()->Get_Weapon() ? s->Get_Vehicle()->Get_Weapon()->Get_Total_Rounds_Fired() : -1) + ")," : "") + "  in hand " + Weapon_Kind(s->Get_Weapon()) +
                         (s->Get_Weapon() ? " (state " + std::to_string((int)s->Get_Weapon()->Get_State()) + ", clip " + std::to_string(s->Get_Weapon()->Get_Clip_Rounds()) + (s->Get_Weapon()->Is_Triggered() ? ", triggered" : "") + ")" : "") + ", carries";
         for (int i = 0; i < s->Get_Weapon_Bag()->Get_Count(); i++)
           if (WeaponClass *x = s->Get_Weapon_Bag()->Peek_Weapon(i))
@@ -1076,6 +1077,48 @@ public:
   }
 };
 
+class BotObjectsConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_objects"; }
+  const char *Get_Help(void) override { return "BOT_OBJECTS <name part> - objects whose preset contains it: id, preset, position."; }
+  void Activate(const char *input) override {
+    for (SLNode<BaseGameObj> *o = GameObjManager::Get_Game_Obj_List()->Head(); o; o = o->Next()) {
+      ScriptableGameObj *g = o->Data()->As_ScriptableGameObj();
+      PhysicalGameObj *p = g ? g->As_PhysicalGameObj() : nullptr;
+      if (!p || (input && *input && !strstr(p->Get_Definition().Get_Name(), input)))
+        continue;
+      Vector3 pos;
+      p->Get_Position(&pos);
+      Say("object %d %s at %.1f %.1f %.1f\n", p->Get_ID(), p->Get_Definition().Get_Name(), pos.X, pos.Y, pos.Z);
+    }
+  }
+};
+
+class BotKillConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  // Test hook (tools/server/scenario.mjs): destroy an object or building
+  // through the normal damage path, e.g. a base defense out of a test's way.
+  const char *Get_Name(void) override { return "bot_kill"; }
+  const char *Get_Help(void) override { return "BOT_KILL <id> - destroy an object (scenario tests)."; }
+  void Activate(const char *input) override {
+    int id = input ? atoi(input) : 0;
+    for (SLNode<BaseGameObj> *o = GameObjManager::Get_Game_Obj_List()->Head(); o; o = o->Next()) {
+      ScriptableGameObj *g = o->Data()->As_ScriptableGameObj();
+      DamageableGameObj *d = g ? g->As_DamageableGameObj() : nullptr;
+      if (!d || d->Get_ID() != id)
+        continue;
+      OffenseObjectClass offense(1e6f, ArmorWarheadManager::Get_Warhead_Type("Earth"), nullptr);
+      if (BuildingGameObj *b = d->As_BuildingGameObj())
+        b->Apply_Damage_Building(offense, false);
+      else
+        d->Apply_Damage(offense);
+      Say("killed %d (%s), health now %.1f\n", id, d->Get_Definition().Get_Name(), d->Get_Defense_Object()->Get_Health());
+      return;
+    }
+    Say("no object %d\n", id);
+  }
+};
+
 class BotC4ConsoleFunctionClass : public ConsoleFunctionClass {
 public:
   const char *Get_Name(void) override { return "bot_c4"; }
@@ -1193,6 +1236,19 @@ public:
           VendorClass::Purchase_Item(s, vehicle ? VendorClass::TYPE_VEHICLE : VendorClass::TYPE_CHARACTER, index, -1, true);
       static const char *RESULTS[] = {"bought", "pending", "no funds", "no factory", "not in stock"};
       Say("%s buys %s %d: %s\n", b.name.c_str(), what, index, result >= 0 && result <= 4 ? RESULTS[result] : "failed");
+    } else if (!strcmp(verb, "spawn") && s) {
+      // Test hook (tools/server/scenario.mjs): a preset 5 m in front of the bot.
+      char preset[96] = {0};
+      if (sscanf(rest, "%95s", preset) == 1)
+        if (PhysicalGameObj *o = ObjectLibraryManager::Create_Object(preset)) {
+          Matrix3D tm = s->Get_Transform();
+          Vector3 at = tm.Get_Translation() + tm.Get_X_Vector() * 5.0f + Vector3(0, 0, 0.5f);
+          Matrix3D place(true);
+          place.Set_Translation(at);
+          o->Set_Transform(place);
+          o->Start_Observers();
+          Say("spawned %s as %d\n", preset, o->Get_ID());
+        }
     } else if (!strcmp(verb, "enter") && s) {
       // Into an empty vehicle next to it, the way the vehicle's door
       // transition does (a bot can't aim for the door zone); "enter" alone
@@ -1294,6 +1350,8 @@ void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
   list.Add(new BotOrderConsoleFunctionClass());
   list.Add(new BotFillConsoleFunctionClass());
   list.Add(new BotC4ConsoleFunctionClass());
+  list.Add(new BotKillConsoleFunctionClass());
+  list.Add(new BotObjectsConsoleFunctionClass());
   list.Add(new BotBrainConsoleFunctionClass());
   list.Add(new BotDoConsoleFunctionClass());
   list.Add(new BotNavConsoleFunctionClass());

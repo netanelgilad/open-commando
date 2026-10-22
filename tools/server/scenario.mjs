@@ -113,12 +113,46 @@ if (which === 'walk' || which === 'all') {
   }
 }
 
+if (which === 'vehicle' || which === 'all') {
+  // A bot in a Medium Tank shoots the Nod Airstrip from 60 m and from 30 m
+  // (east of it, out of the Obelisk's reach): does a vehicle hurt a building?
+  const id = await addBot('gdi');
+  const air = (await buildings()).find((b) => /Nod_Airstrip/.test(b.name));
+  // Nod's defenses out of the way (Obelisk, turrets): this is about the tank.
+  const obelisk = (await buildings()).find((b) => /Obelisk/.test(b.name));
+  console.log((await ask(`bot_kill ${obelisk.id}`, 800)).trim());
+  for (const m of (await ask('bot_objects Turret', 800)).matchAll(/object (\d+)/g)) console.log((await ask(`bot_kill ${m[1]}`, 400)).trim());
+  // Spots on walkable ground at given distances ("range:x:y,..."; from a
+  // record's grid), else east of it.
+  const spots = (process.env.SPOTS || '40,60,75').split(',').map((s) => s.split(':').map(Number));
+  for (const [range, sx, sy] of spots) {
+    const at = sx !== undefined ? [sx, sy, air.pos[2] + 3] : [air.pos[0] + range, air.pos[1], air.pos[2] + 3];
+    await ask(`bot_do ${id} place ${at.join(' ')}`, 2000);
+    const spawned = /spawned \S+ as (\d+)/.exec(await ask(`bot_do ${id} spawn CnC_GDI_Medium_Tank`, 1500))?.[1];
+    await ask(`bot_do ${id} enter ${spawned}`, 3000);
+    const before = (await buildings()).find((b) => b.id === air.id).hp;
+    const listing = (await ask('bot_list', 800)).split('\n');
+    const inside = listing.slice(listing.findIndex((l) => l.includes(`bot ${id} `))).slice(0, 2).join(' / ');
+    const aim = process.env.AIM === 'mct' && air.mct ? air.mct : [air.pos[0], air.pos[1], air.pos[2] + 2];
+    await ask(`bot_do ${id} shoot ${aim.join(' ')}`, 500);
+    await sleep(20000);
+    const after = (await buildings()).find((b) => b.id === air.id).hp;
+    const listed = (await ask('bot_list', 800)).split('\n').find((l) => /driving/.test(l));
+    console.log(`  after shooting: ${listed?.replace(/^\S+ /, '').slice(0, 120)}`);
+    console.log(`vehicle ${spawned} at ${range} m: ${inside?.replace(/^\S+ /, '').replace(/waypoint.*?replans \d+, /, '').slice(0, 260)}`);
+    results.push(`vehicle shoots a building from ${range} m: ${after < before ? 'PASS' : 'FAIL'} (Airstrip ${before} -> ${after})`);
+    await ask(`bot_do ${id} hold_fire`, 300);
+    await ask(`bot_do ${id} maneuver get_out`, 1500);
+  }
+}
+
 if (which === 'repair' || which === 'all') {
   // A damaged GDI building and a GDI engineer type (Hotwire) by its MCT
   // repairing it: health goes up.
   results.push('repair: (not scripted yet)');
 }
 
+if (process.env.DEBUG_LOG) console.log(log.split('\n').filter((l) => /killed|died|placed|spawned|enter|gets in|destroy|Vance/i.test(l)).slice(-40).join('\n'));
 for (const r of results) console.log(r);
 done();
 process.exit(results.some((r) => r.includes('FAIL')) ? 1 : 0);
