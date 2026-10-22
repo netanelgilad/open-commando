@@ -945,7 +945,9 @@ public:
     SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id);
     float x, y, z;
     b.dirty = true;
-    if (!strcmp(verb, "go") && sscanf(rest, "%f %f %f", &x, &y, &z) == 3) {
+    // Coordinates must be numbers ("inf" and "nan" parse as floats too).
+    auto finite3 = [&]() { return std::isfinite(x) && std::isfinite(y) && std::isfinite(z); };
+    if (!strcmp(verb, "go") && sscanf(rest, "%f %f %f", &x, &y, &z) == 3 && finite3()) {
       b.point = Vector3(x, y, z);
       if (s) {
         Vector3 me;
@@ -963,7 +965,7 @@ public:
     } else if (!strcmp(verb, "target")) {
       b.targetId = atoi(rest);
       b.shootAt = false;
-    } else if (!strcmp(verb, "shoot") && sscanf(rest, "%f %f %f", &x, &y, &z) == 3) {
+    } else if (!strcmp(verb, "shoot") && sscanf(rest, "%f %f %f", &x, &y, &z) == 3 && finite3()) {
       b.shootAt = true;
       b.shootPoint = Vector3(x, y, z);
       b.targetId = 0;
@@ -1050,7 +1052,7 @@ public:
         b.detourUntil = emscripten_get_now() + 5000;
         b.lastGoto = 0;
       }
-    } else if (!strcmp(verb, "place") && s && sscanf(rest, "%f %f %f", &x, &y, &z) == 3) {
+    } else if (!strcmp(verb, "place") && s && sscanf(rest, "%f %f %f", &x, &y, &z) == 3 && finite3()) {
       // Testing: put the bot somewhere (no walking).
       s->Set_Position(Vector3(x, y, z));
       Vector3 now_at;

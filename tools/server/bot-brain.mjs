@@ -347,14 +347,30 @@ export const PLANNER_MODELS = {
   // (Tried, too slow for a bot: glm-5.3-flash and gemma-4-26b always think
   // first, 6-14 s for a plan; no setting turned it off.)
   'gpt-oss-20b': { timeoutMs: 8000, input: { reasoning_effort: 'low', max_tokens: 1200 } }, // its reasoning counts against max_tokens
+  // Through Vercel AI Gateway (services/match ai.js): many providers behind
+  // one model, no gateway rate limit, several times cheaper per token.
+  // Thinking off (else 400 tokens of reasoning and no answer); providers by
+  // measured speed: baseten 0.9 s, deepinfra 2.8 s (cheapest), wafer 2 s.
+  // (azure and gmicloud returned broken JSON, digitalocean took 5-11 s.)
+  'vercel/deepseek-v4-flash': { timeoutMs: 6000, input: { response_format: { type: 'json_object' }, reasoning: { enabled: false }, providerOptions: { gateway: { order: ['baseten', 'deepinfra', 'wafer'], only: ['baseten', 'deepinfra', 'wafer'] } } } },
+  'vercel/gpt-oss-20b': { timeoutMs: 8000, input: { reasoning_effort: 'low', max_tokens: 1200 } },
 };
 // From a comparison over 3 recorded games (2840 plans): deepseek names 94%
 // of things exactly but times out under load; qwen3-30b answers in 1.2 s,
 // fails 1%, costs a third, names 57% exactly (near misses resolve). So bots
 // are split between the two; glm-4.7-flash (rarely attacks, chats 92% of the
 // time) and gpt-oss-20b (39% exact, dearest) only stand in.
-export const DEFAULT_PLANNERS = 'deepseek-v4-flash,qwen3-30b|glm-4.7-flash,gpt-oss-20b';
-export const DEFAULT_DECIDERS = 'clef-flash:30,clef-omni:2'; // a couple on clef-omni to keep comparing
+// From a 32-player game with each model on 8 bots: deepseek through Vercel
+// names 93% of things exactly (as on Workers AI) in 1.15 s instead of
+// 2.75 s, at 0.088 m$ a plan instead of 0.46, and timed out 12 times
+// instead of 57. qwen3-30b (fast, cheap, 57% exact) stands in first, then
+// deepseek on Workers AI, then gpt-oss.
+export const DEFAULT_PLANNERS = 'vercel/deepseek-v4-flash|qwen3-30b,deepseek-v4-flash,gpt-oss-20b';
+// Liquid d1 (393 ms, 0.023 m$ a decision) and Perplexity's Decider v1.2
+// (439 ms, 0.021 m$) against clef-flash (592 ms, 0.042 m$); clef-flash
+// keeps a share so the games keep comparing them. (TypeSafe's Jev: 349 ms
+// but 0.062 m$.)
+export const DEFAULT_DECIDERS = 'vercel/d1:12,vercel/decider:12,clef-flash:8';
 // (llama-4-scout was a fallback: in a full 32-player game it timed out 296
 // times for 183 answers, each timeout a bot waiting 8 s for nothing.)
 const SKIP_FAILED_MS = 60000; // a model that errors
@@ -423,7 +439,7 @@ export function llmPlanner(ai, stats, rec = () => {}) {
           throw e;
         }
         const usage = body.output.usage || {};
-        const usd = callUsd(model, usage);
+        const usd = callUsd(model, usage, body.output);
         rec('planner_call', { bot: view.me.name, model, first: chain[0], ms: Date.now() - t0, usage, usd, reason, playbook: options.playbookKey, prompt, reply: typeof text === 'string' ? text : JSON.stringify(text) });
         stats.calls++;
         stats.ms.push(Date.now() - t0);
@@ -521,10 +537,10 @@ const cleanSay = (t) => String(t || '').replace(/[\u2013\u2014]/g, ' - ').replac
 // bot never waits on the model.
 const CLEF_TIMEOUT_MS = 2500; // big games: Workers AI slows down with many calls in flight
 // Clef models, per bot (REBEL_DECIDERS): the same typed questions to each.
-export const DECIDER_MODELS = ['clef-flash', 'clef-omni', 'clef'];
+export const DECIDER_MODELS = ['clef-flash', 'clef-omni', 'clef', 'vercel/d1', 'vercel/d1-ultra', 'vercel/decider', 'vercel/decider-flash', 'vercel/decision-1', 'vercel/jev'];
 function clefDecider(ai, stats) {
   const per = (model) => (stats.models ??= {})[model] ??= { calls: 0, failed: 0, ms: [], usd: 0 };
-  return async (state, questions, model = 'clef-flash') => {
+  const decide = async (state, questions, model = 'clef-flash', retried = false) => {
     const t0 = Date.now();
     const m = per(model);
     try {
@@ -539,7 +555,7 @@ function clefDecider(ai, stats) {
       stats.calls++;
       stats.ms.push(Date.now() - t0);
       stats.tokens += body.output.usage?.input_tokens || 0;
-      const usd = callUsd(model, body.output.usage);
+      const usd = callUsd(model, body.output.usage, body.output);
       stats.usd = (stats.usd || 0) + usd;
       m.calls++;
       m.ms.push(Date.now() - t0);
@@ -554,9 +570,13 @@ function clefDecider(ai, stats) {
       stats.failed++;
       m.failed++;
       stats.lastError = `${model}: ${String(e.message || e)}`;
+      // A gateway model failing (out of credit, a provider down): this
+      // decision goes to Clef on Workers AI instead of the scripted reflexes.
+      if (model !== 'clef-flash' && !retried) return decide(state, questions, 'clef-flash', true);
       return null;
     }
   };
+  return decide;
 }
 
 const CALLOUTS = {
@@ -576,12 +596,24 @@ const PRICES = {
   'glm-4.7-flash': [0.06, 0.06, 0.4],
   'qwen3-30b': [0.051, 0.051, 0.335],
   'gemma-4-26b': [0.1, 0.1, 0.3],
+  // Vercel AI Gateway list prices (its responses carry the real cost too).
+  'vercel/deepseek-v4-flash': [0.06, 0.0091, 0.18],
+  'vercel/gpt-oss-20b': [0.07, 0.07, 0.3],
+  'vercel/d1': [0.02, 0.02, 0],
+  'vercel/d1-ultra': [0.042, 0.042, 0],
+  'vercel/decider': [0.02, 0.02, 0],
+  'vercel/decider-flash': [0.01, 0.01, 0],
+  'vercel/decision-1': [0.042, 0.042, 0],
+  'vercel/jev': [0.042, 0.042, 0],
   'deepseek-v4-flash': [0.44, 0.014, 1.32],
   'gpt-oss-20b': [0.2, 0.2, 0.3],
   'llama-4-scout': [0.27, 0.27, 0.85],
 };
 // A call's cost from its usage (OpenAI-style fields; cached tokens where reported).
-export function callUsd(model, usage = {}) {
+export function callUsd(model, usage = {}, output = null) {
+  // What the gateway billed, when it says (Vercel does).
+  const billed = +(output?.provider_metadata?.gateway?.cost ?? output?.providerMetadata?.gateway?.cost ?? NaN);
+  if (Number.isFinite(billed)) return billed;
   const [inp, cached, out] = PRICES[model] || [0.5, 0.5, 1.5];
   const prompt = usage.prompt_tokens ?? usage.input_tokens ?? 0;
   const hit = usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0;
@@ -601,13 +633,22 @@ export function modelPlan(planners = DEFAULT_PLANNERS, deciders = 'clef-flash') 
   const fallbacks = names(standby);
   const mix = String(deciders).split(',').map((x) => x.trim().split(':')).filter(([m]) => DECIDER_MODELS.includes(m)).map(([m, w]) => [m, Math.max(0, +(w ?? 1) || 1)]);
   const total = mix.reduce((n, [, w]) => n + w, 0) || 1;
-  // Evenly spread: the k-th bot takes the model whose share is most behind.
+  // Evenly spread: a sequence where each next slot takes the model whose
+  // share is most behind. Bot i takes slot i + floor(i / pool size), so each
+  // round of planners meets the deciders shifted by one (a Latin square):
+  // without it, with 4 planners and 4 deciders every bot of a planner had the
+  // same decider, and their scores couldn't tell the two apart.
   const given = Object.fromEntries(mix.map(([m]) => [m, 0]));
+  const sequence = [];
+  for (let n = 0; n < 256; n++) {
+    const m = mix.length ? mix.map(([m, w]) => [m, (w / total) * (n + 1) - given[m]]).sort((a, b) => b[1] - a[1])[0][0] : 'clef-flash';
+    given[m] = (given[m] || 0) + 1;
+    sequence.push(m);
+  }
   let k = 0;
   return () => {
     const i = k++;
-    const decider = mix.length ? mix.map(([m, w]) => [m, (w / total) * (i + 1) - given[m]]).sort((a, b) => b[1] - a[1])[0][0] : 'clef-flash';
-    given[decider] = (given[decider] || 0) + 1;
+    const decider = sequence[(i + Math.floor(i / pool.length)) % sequence.length];
     const own = pool[i % pool.length];
     return { planners: [...new Set([own, ...pool, ...fallbacks, 'gpt-oss-20b'])], decider };
   };
@@ -617,6 +658,13 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   const nextModels = modelPlan(planners, deciders);
   // Every command the bots get goes into the record too.
   const send = (line) => {
+    // A position that isn't a number never goes to the engine (an infinite
+    // one hung the server in path finding); it's logged to find its source.
+    if (/ (go|shoot|place) /.test(line) && /NaN|Infinity|undefined/.test(line)) {
+      rec('bad_command', { line, stack: new Error().stack.split('\n').slice(2, 7).join(' | ') });
+      out(`[brain] dropped a bad command: ${line}`);
+      return;
+    }
     rec('command', { line });
     sendCommand(line);
   };

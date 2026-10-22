@@ -256,8 +256,14 @@ struct Grid {
   // The node a walker at `p` stands on (or the nearest one around). Nodes
   // far above or below count as farther (a roof over the soldier's cell).
   int Nearest(const Vector3 &p) {
-    int ci, cj;
-    Cell_Of(p.X, p.Y, &ci, &cj);
+    // A point off the map starts from the nearest edge cell; one that isn't a
+    // number has no nearest node. (An infinite coordinate made the cell index
+    // INT_MAX and `ci + r` overflow: the server hung here, in a bot's "go".)
+    if (!std::isfinite(p.X) || !std::isfinite(p.Y) || !std::isfinite(p.Z) || NX <= 0 || NY <= 0)
+      return -1;
+    float fi = floorf((p.X - Min.X) / CELL), fj = floorf((p.Y - Min.Y) / CELL);
+    int ci = (int)std::min(std::max(fi, 0.0f), (float)(NX - 1));
+    int cj = (int)std::min(std::max(fj, 0.0f), (float)(NY - 1));
     int best = -1;
     float best_d = 1e30f;
     for (int r = 0; r <= 10; r++) {

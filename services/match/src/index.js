@@ -25,7 +25,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Room } from '../../hub/src/index.js';
 import { Matchmaker } from './matchmaker-do.js';
 import { REGIONS, regionOf } from './regions.js';
-import { aiKey, AI_MODELS } from './ai.js';
+import { aiKey, AI_MODELS, runModel } from './ai.js';
 
 export { Room, Matchmaker };
 
@@ -144,7 +144,7 @@ export default {
       const t0 = Date.now();
       try {
         const options = typeof affinity === 'string' && /^[\w.-]{1,64}$/.test(affinity) ? { extraHeaders: { 'x-session-affinity': affinity } } : {};
-        const output = await env.AI.run(AI_MODELS[model], input, options);
+        const output = await runModel(env, model, input, options);
         return json({ ms: Date.now() - t0, output });
       } catch (e) {
         return json({ ms: Date.now() - t0, error: String(e) }, 502);
