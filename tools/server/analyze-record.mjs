@@ -166,6 +166,22 @@ if (assigned.size) {
   }
 }
 
+// Combat (engine damage attribution): who damaged buildings with what, how
+// much on the MCT; kills by weapon; pushes and C4.
+const dmg = of('damage');
+if (dmg.length) {
+  const hits = dmg.flatMap((d) => d.hits), kills = dmg.flatMap((d) => d.kills);
+  const total = hits.reduce((n, h) => n + h.dealt, 0), mct = hits.reduce((n, h) => n + h.mct, 0);
+  const sumBy = (key) => Object.entries(hits.reduce((m, h) => ((m[key(h)] = (m[key(h)] || 0) + h.dealt), m), {})).sort((a, b) => b[1] - a[1]);
+  say(`\n== Combat: ${Math.round(total)} damage to buildings (${total ? Math.round((100 * mct) / total) : 0}% on MCTs), ${kills.length} kills`);
+  say(`building damage by team: ${sumBy((h) => h.team || 'none').map(([k, v]) => `${k} ${Math.round(v)}`).join(', ')}`);
+  say(`by attacker: ${sumBy((h) => `${h.team || '?'} ${h.what.replace(/^CnC_/, '').split('/')[0]}`).slice(0, 10).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ')}`);
+  say(`kills by weapon: ${top(count(kills, (k) => k.what.replace(/^CnC_/, '').split('/')[0] || '?'), 10)}`);
+  say(`vehicles destroyed: ${kills.filter((k) => k.vehicle).length} (${top(count(kills.filter((k) => k.vehicle), (k) => k.preset.replace(/^CnC_/, '')), 8)})`);
+}
+const pushes = of('push'), c4 = of('c4');
+if (pushes.length || c4.length) say(`team pushes: ${pushes.length} (${top(count(pushes, (p) => `${p.team}->${p.name}`), 6)}), avg ${pushes.length ? (pushes.reduce((n, p) => n + p.with, 0) / pushes.length).toFixed(1) : 0} bots at the start; C4 plants: ${c4.length} (${top(count(c4, (c) => `${c.team}->${c.name}`), 6)})`);
+
 const fatal = of('fatal');
 if (fatal.length) say(`\n== FATAL: ${fatal[0].error.split('\n').slice(0, 6).join(' | ')}`);
 console.log(out.join('\n'));

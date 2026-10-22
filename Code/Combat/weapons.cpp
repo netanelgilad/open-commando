@@ -516,6 +516,33 @@ float WeaponClass::Get_Range(void) {
 /*
 **	Fire_C4
 */
+bool WeaponClass::Toss_C4(const Vector3 *target) {
+  if (Get_Style() != WEAPON_HOLD_STYLE_C4 || PrimaryAmmoDefinition == NULL || Get_Total_Rounds() == 0)
+    return false;
+  Decrement_Rounds(PrimaryAmmoDefinition->SprayBulletCost);
+  if (!CombatManager::I_Am_Server())
+    return true;
+  if (target == NULL || Get_Owner() == NULL) {
+    Fire_C4(PrimaryAmmoDefinition);
+    return true;
+  }
+  // From 1.5 m short of the target (outside the console, or it passes through it),
+  // on the side the thrower stands, aimed at it.
+  Vector3 from;
+  Get_Owner()->Get_Position(&from);
+  from.Z = target->Z;
+  Vector3 dir = from - *target;
+  if (dir.Length() < 0.01f)
+    dir.Set(1, 0, 0);
+  dir.Normalize();
+  Matrix3D tm(true);
+  tm.Obj_Look_At(*target + dir * 1.5f, *target, 0);
+  C4GameObj *c4 = (C4GameObj *)ObjectLibraryManager::Create_Object("Tossed C4");
+  if (c4)
+    c4->Init_C4(PrimaryAmmoDefinition, Get_Owner()->As_SoldierGameObj(), C4DetonationMode, tm);
+  return true;
+}
+
 void WeaponClass::Fire_C4(const AmmoDefinitionClass *ammo_def) {
 #define C4_OBJECT_NAME "Tossed C4"
 

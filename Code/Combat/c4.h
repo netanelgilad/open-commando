@@ -107,6 +107,10 @@ public:
   virtual void Import_Rare(BitStreamClass &packet);
 
   ScriptableGameObj *Get_Stuck_Object(void) { return StuckObject.Get_Ptr(); }
+  // State, read-only (the web port's bot tools).
+  bool Is_Stuck(void) const { return Stuck; }
+  bool Is_Stuck_To_MCT(void) const { return StuckMCT; }
+  float Get_Timer(void) const { return Timer; }
 
   virtual void Completely_Damaged(const OffenseObjectClass &damager);
 

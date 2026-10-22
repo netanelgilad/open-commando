@@ -231,6 +231,8 @@ public:
   ** Building component support
   */
   void Collect_Building_Components(void);
+  // Where the Master Control Terminal is (the first MCT part), for bots.
+  bool Get_MCT_Position(Vector3 &pos);
   void Get_Collection_Sphere(SphereClass *sphere) const { *sphere = CollectionSphere; }
   void Set_Collection_Sphere(const SphereClass &sphere) { CollectionSphere = sphere; }
 

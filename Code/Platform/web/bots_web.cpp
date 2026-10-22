@@ -34,6 +34,8 @@
 #include "definitionmgr.h"
 #include "armedgameobj.h"
 #include "weaponmanager.h"
+#include "weaponbag.h"
+#include "c4.h"
 #include "explosion.h"
 #include "combatchunkid.h"
 #include "mapmgr.h"
@@ -96,6 +98,10 @@ struct Bot {
   // Brain mode (bot_do): what to shoot while walking or standing.
   int targetId = 0;      // a soldier or vehicle (object id), 0 = none
   bool shootAt = false;  // ... or a point (a building)
+  double c4Until = 0;     // planting C4 until then, then back to weaponBefore
+  double c4Since = 0;
+  bool c4Tossed = false;
+  int weaponBefore = 0;
   Vector3 shootPoint;
   bool dirty = false;    // a new order: act on it now
   bool driving = false;  // in a vehicle (its grid, its orders)
@@ -107,6 +113,7 @@ struct Bot {
 };
 
 std::vector<Bot> Bots;
+const char *Weapon_Kind(WeaponClass *w);
 bool Brain = false;      // bot_brain on: an outside brain decides (bot_do), see below
 double NextState = 0;
 int Fill = 0;            // bot_fill: keep this many players in the game
@@ -405,10 +412,18 @@ public:
         s->Get_Velocity(vel);
       }
       int rounds = s && s->Get_Weapon() ? s->Get_Weapon()->Get_Total_Rounds() : -1;
-      Say("bot %s %s %s %s at %.1f %.1f %.1f, speed %.1f, waypoint %d/%d to %.1f %.1f, replans %d, order %s%s, rounds %d\n", b.name.c_str(),
+      Say("bot %d %s %s %s %s at %.1f %.1f %.1f, speed %.1f, waypoint %d/%d to %.1f %.1f, replans %d, order %s%s, rounds %d\n", b.id, b.name.c_str(),
           b.team == PLAYERTYPE_GDI ? "GDI" : "Nod", GOALS[b.goal], s ? "alive" : "dead", p.X, p.Y, p.Z, vel.Length(),
           (int)b.wp, (int)b.path.size(), b.dest.X, b.dest.Y, b.stuck, b.accepted ? "taken" : "refused",
           b.shootAt ? ", shooting a point" : b.targetId ? ", shooting a target" : "", rounds);
+      if (s && s->Get_Weapon_Bag()) { // what it carries: kind:rounds, the one in hand first
+        std::string w = std::string("  in hand ") + Weapon_Kind(s->Get_Weapon()) +
+                        (s->Get_Weapon() ? " (state " + std::to_string((int)s->Get_Weapon()->Get_State()) + ", clip " + std::to_string(s->Get_Weapon()->Get_Clip_Rounds()) + (s->Get_Weapon()->Is_Triggered() ? ", triggered" : "") + ")" : "") + ", carries";
+        for (int i = 0; i < s->Get_Weapon_Bag()->Get_Count(); i++)
+          if (WeaponClass *x = s->Get_Weapon_Bag()->Peek_Weapon(i))
+            w += std::string(" ") + Weapon_Kind(x) + ":" + std::to_string(x->Get_Total_Rounds());
+        Say("%s\n", w.c_str());
+      }
     }
     Say("%d bots, walking grids: soldiers %d nodes, vehicles %d\n", (int)Bots.size(), NavGrid::Node_Count(NavGrid::SOLDIER), NavGrid::Node_Count(NavGrid::VEHICLE));
   }
@@ -559,6 +574,121 @@ void Feel(SoldierGameObj *s, float out[6]) {
   body->Peek_Physical_Object()->Dec_Ignore_Counter();
   if (body != s)
     s->Peek_Physical_Object()->Dec_Ignore_Counter();
+}
+
+// Who damaged what (damage.cpp calls Rebel_On_Damage on the server), for game
+// records: damage to buildings summed per building and attacker, and every
+// kill, between two state reports. The attacker is its player (a vehicle's
+// driver), or the preset when no player (base defenses, harvesters).
+struct Hit {
+  int building, by;
+  std::string what;
+  float dealt = 0, mct = 0;
+};
+struct Kill {
+  int victim, by;
+  bool vehicle;
+  std::string what, victim_preset;
+};
+std::vector<Hit> Hits;
+std::vector<Kill> Kills;
+
+int Player_Of(SmartGameObj *o) {
+  if (!o)
+    return 0;
+  if (VehicleGameObj *v = o->As_VehicleGameObj())
+    o = v->Get_Driver();
+  SoldierGameObj *s = o ? o->As_SoldierGameObj() : nullptr;
+  cPlayer *p = s && s->Get_Player_Data() ? (cPlayer *)s->Get_Player_Data() : nullptr;
+  return p ? p->Get_Id() : 0;
+}
+
+std::string Attack_Name(ArmedGameObj *a) {
+  if (!a)
+    return "";
+  std::string n = a->Get_Definition().Get_Name();
+  if (WeaponClass *w = a->Get_Weapon())
+    n += std::string("/") + w->Get_Definition()->Get_Name();
+  return n;
+}
+
+extern "C" void Rebel_On_Damage(DamageableGameObj *victim, ArmedGameObj *attacker, float dealt, int alternate_skin, bool killed) {
+  if (Bots.empty() || !victim)
+    return;
+  SmartGameObj *smart = attacker ? attacker->As_SmartGameObj() : nullptr;
+  int by = Player_Of(smart);
+  if (BuildingGameObj *b = victim->As_BuildingGameObj()) {
+    std::string what = Attack_Name(attacker);
+    // Buildings always pass their skin; it's the MCT when it's the MCT's.
+    const BuildingGameObjDef &def = b->Get_Definition();
+    alternate_skin = alternate_skin == (int)def.Get_MCT_Skin() && def.Get_MCT_Skin() != (ArmorType)(unsigned)def.Get_DefenseObjectDef().Skin ? 1 : -1;
+    for (Hit &h : Hits)
+      if (h.building == b->Get_ID() && h.by == by && h.what == what) {
+        h.dealt += dealt;
+        h.mct += alternate_skin >= 0 ? dealt : 0;
+        return;
+      }
+    if (Hits.size() < 500)
+      Hits.push_back({b->Get_ID(), by, what, dealt, alternate_skin >= 0 ? dealt : 0});
+    return;
+  }
+  if (!killed || Kills.size() >= 500)
+    return;
+  SmartGameObj *v = victim->As_SmartGameObj();
+  bool vehicle = v && v->As_VehicleGameObj();
+  int victim_id = vehicle ? v->Get_ID() : Player_Of(v);
+  Kills.push_back({victim_id, by, vehicle, Attack_Name(attacker), victim->Get_Definition().Get_Name()});
+}
+
+void Damage_Json(std::string &j) {
+  char buf[256];
+  j += ",\"hits\":[";
+  for (size_t i = 0; i < Hits.size(); i++) {
+    snprintf(buf, sizeof(buf), "%s{\"building\":%d,\"by\":%d,\"dealt\":%.1f,\"mct\":%.1f,\"what\":", i ? "," : "", Hits[i].building, Hits[i].by,
+             Hits[i].dealt, Hits[i].mct);
+    j += buf;
+    Json_String(j, Hits[i].what);
+    j += "}";
+  }
+  j += "],\"kills\":[";
+  for (size_t i = 0; i < Kills.size(); i++) {
+    snprintf(buf, sizeof(buf), "%s{\"victim\":%d,\"vehicle\":%s,\"by\":%d,\"what\":", i ? "," : "", Kills[i].victim, Kills[i].vehicle ? "true" : "false",
+             Kills[i].by);
+    j += buf;
+    Json_String(j, Kills[i].what);
+    j += ",\"preset\":";
+    Json_String(j, Kills[i].victim_preset);
+    j += "}";
+  }
+  j += "]";
+  Hits.clear();
+  Kills.clear();
+}
+
+// What a weapon is for a bot: timed/remote/proximity C4, a repair gun, or a gun.
+const char *Weapon_Kind(WeaponClass *w) {
+  if (!w || !w->Get_Definition())
+    return "gun";
+  AmmoDefinitionClass *a = (AmmoDefinitionClass *)DefinitionMgrClass::Find_Definition(w->Get_Definition()->PrimaryAmmoDefID, false);
+  if (!a || a->Get_Class_ID() != CLASSID_DEF_AMMO)
+    return "gun";
+  switch ((int)a->AmmoType) {
+  case AmmoDefinitionClass::AMMO_TYPE_C4_TIMED:
+    return "c4_timed";
+  case AmmoDefinitionClass::AMMO_TYPE_C4_REMOTE:
+    return "c4_remote";
+  case AmmoDefinitionClass::AMMO_TYPE_C4_PROXIMITY:
+    return "c4_proximity";
+  }
+  return (float)a->Damage < 0 ? "repair" : "gun";
+}
+
+int Weapon_Index_Of(SoldierGameObj *s, const char *kind) {
+  WeaponBagClass *bag = s->Get_Weapon_Bag();
+  for (int i = 0; bag && i < bag->Get_Count(); i++)
+    if (bag->Peek_Weapon(i) && !strcmp(Weapon_Kind(bag->Peek_Weapon(i)), kind) && bag->Peek_Weapon(i)->Get_Total_Rounds() != 0)
+      return i;
+  return -1;
 }
 
 // As the purchase menu: aircraft only on maps made for them.
@@ -732,6 +862,17 @@ void Emit_State(double now) {
     j += ",\"facts\":";
     Facts_Json(j);
   }
+  // The walking grid, once it's built (game records draw the map from it).
+  static StringClass grid_map;
+  if (grid_map != The_Game()->Get_Map_Name()) {
+    std::string grid;
+    if (NavGrid::Map_Json(NavGrid::SOLDIER, grid)) {
+      grid_map = The_Game()->Get_Map_Name();
+      j += ",\"grid\":";
+      j += grid;
+    }
+  }
+  Damage_Json(j);
   j += ",\"buildings\":[";
   bool first = true;
   for (SLNode<BuildingGameObj> *n = GameObjManager::Get_Building_Game_Obj_List()->Head(); n; n = n->Next()) {
@@ -744,6 +885,11 @@ void Emit_State(double now) {
     Json_Pos(j, p);
     j += ",\"name\":";
     Json_String(j, bld->Get_Definition().Get_Name());
+    Vector3 mct;
+    if (bld->Get_MCT_Position(mct)) {
+      j += ",\"mct\":";
+      Json_Pos(j, mct);
+    }
     j += "}";
     first = false;
   }
@@ -866,6 +1012,21 @@ void Emit_State(double now) {
     s->Get_Position(&here);
     snprintf(buf, sizeof(buf), "\"tiberium\":%s,", !s->Get_Vehicle() && NavGrid::On_Tiberium(here) ? "true" : "false");
     j += buf;
+    // Its weapons (kind and rounds, -1 unlimited) and the one in hand.
+    j += "\"weapons\":[";
+    if (WeaponBagClass *bag = s->Get_Weapon_Bag()) {
+      bool any = false; // (empty slots are skipped: no comma before the first)
+      for (int i = 0; i < bag->Get_Count(); i++) {
+        WeaponClass *w = bag->Peek_Weapon(i);
+        if (!w)
+          continue;
+        snprintf(buf, sizeof(buf), "%s[\"%s\",%d]", any ? "," : "", Weapon_Kind(w), w->Get_Total_Rounds());
+        j += buf;
+        any = true;
+      }
+    }
+    snprintf(buf, sizeof(buf), "],\"in_hand\":\"%s\",", Weapon_Kind(s->Get_Weapon()));
+    j += buf;
     snprintf(buf, sizeof(buf), "\"feel\":[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f],\"speed\":%.1f,\"driving\":%s,\"maneuver\":%s,\"sees\":[",
              f[0], f[1], f[2], f[3], f[4], f[5], vel.Length(), s->Get_Vehicle() ? "true" : "false",
              b.detour || now < b.waitUntil ? "true" : "false");
@@ -908,7 +1069,33 @@ public:
       Say("building %d %s %s hp %.3f (health %.1f/%.1f, shield %.1f/%.1f) at %.1f %.1f %.1f\n", bld->Get_ID(),
           bld->Get_Definition().Get_Name(), Team_Name(bld->Get_Player_Type()), bld->Is_Destroyed() ? 0.0f : Health_Of(bld),
           d->Get_Health(), d->Get_Health_Max(), d->Get_Shield_Strength(), d->Get_Shield_Strength_Max(), p.X, p.Y, p.Z);
+      Vector3 mct;
+      if (bld->Get_MCT_Position(mct))
+        Say("  mct %d at %.1f %.1f %.1f\n", bld->Get_ID(), mct.X, mct.Y, mct.Z);
     }
+  }
+};
+
+class BotC4ConsoleFunctionClass : public ConsoleFunctionClass {
+public:
+  const char *Get_Name(void) override { return "bot_c4"; }
+  const char *Get_Help(void) override { return "BOT_C4 - list the C4 in the level: where, stuck to what, fuse left."; }
+  void Activate(const char *) override {
+    int n = 0;
+    for (SLNode<BaseGameObj> *o = GameObjManager::Get_Game_Obj_List()->Head(); o; o = o->Next()) {
+      PhysicalGameObj *p = o->Data()->As_ScriptableGameObj() ? o->Data()->As_ScriptableGameObj()->As_PhysicalGameObj() : nullptr;
+      C4GameObj *c4 = p ? p->As_C4GameObj() : nullptr;
+      if (!c4)
+        continue;
+      Vector3 pos;
+      c4->Get_Position(&pos);
+      ScriptableGameObj *stuck = c4->Get_Stuck_Object();
+      Say("c4 %d at %.1f %.1f %.1f, %s%s%s, fuse %.1f s\n", c4->Get_ID(), pos.X, pos.Y, pos.Z, c4->Is_Stuck() ? "stuck" : "loose",
+          stuck ? " to " : "", stuck ? stuck->Get_Definition().Get_Name() : "", c4->Get_Timer());
+      Say("  %s\n", c4->Is_Stuck_To_MCT() ? "on the MCT" : "not on an MCT");
+      n++;
+    }
+    Say("%d C4\n", n);
   }
 };
 
@@ -969,6 +1156,28 @@ public:
       b.shootAt = true;
       b.shootPoint = Vector3(x, y, z);
       b.targetId = 0;
+    } else if (!strcmp(verb, "c4") && s && sscanf(rest, "%f %f %f", &x, &y, &z) == 3 && finite3()) {
+      // Plant C4 at a point (a building's MCT, from close by): timed C4 if
+      // it has some, else remote (it goes off when the bot dies or after a
+      // while), else a proximity mine; fired at the point, then back to the
+      // weapon it had.
+      int i = Weapon_Index_Of(s, "c4_timed");
+      if (i < 0)
+        i = Weapon_Index_Of(s, "c4_remote");
+      if (i < 0)
+        i = Weapon_Index_Of(s, "c4_proximity");
+      if (i >= 0 && s->Get_Weapon_Bag()) {
+        if (b.c4Until <= 0)
+          b.weaponBefore = s->Get_Weapon_Bag()->Get_Index();
+        s->Get_Weapon_Bag()->Select_Index(i);
+        b.shootPoint = Vector3(x, y, z);
+        b.targetId = 0;
+        b.c4Until = emscripten_get_now() + 4000; // the switch takes a moment, then the toss
+        b.c4Since = emscripten_get_now();
+        b.c4Tossed = false;
+        b.shootAt = false; // no attack action: the toss is ours (see the step loop)
+        Order(b, s, nullptr);
+      }
     } else if (!strcmp(verb, "hold_fire")) {
       b.shootAt = false;
       b.targetId = 0;
@@ -1084,6 +1293,7 @@ void Rebel_Bots_Add_Commands(DynamicVectorClass<ConsoleFunctionClass *> &list) {
   list.Add(new BotListConsoleFunctionClass());
   list.Add(new BotOrderConsoleFunctionClass());
   list.Add(new BotFillConsoleFunctionClass());
+  list.Add(new BotC4ConsoleFunctionClass());
   list.Add(new BotBrainConsoleFunctionClass());
   list.Add(new BotDoConsoleFunctionClass());
   list.Add(new BotNavConsoleFunctionClass());
@@ -1160,6 +1370,28 @@ void Rebel_Bots_Think(void) {
         b.wp = 0;
       }
     }
+    if (b.c4Until > 0 && now > b.c4Until) { // planted: back to the weapon it had
+      b.c4Until = 0;
+      b.shootAt = false;
+      if (SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id))
+        if (s->Get_Weapon_Bag() && b.weaponBefore < s->Get_Weapon_Bag()->Get_Count())
+          s->Get_Weapon_Bag()->Select_Index(b.weaponBefore);
+    }
+    // Planting C4: the attack action never pulls the trigger for it (the
+    // weapon sat idle in hand), so the bot faces the point and pulls it
+    // itself, as a player does; the weapon throws the C4 the usual way.
+    if (b.c4Until > now)
+      if (SoldierGameObj *s = GameObjManager::Find_Soldier_Of_Client_ID(b.id))
+        if (WeaponClass *w = s->Get_Weapon())
+          if (!strncmp(Weapon_Kind(w), "c4_", 3)) {
+            s->Set_Targeting(b.shootPoint);
+            // A second to finish switching (and face it), then the toss.
+            if (now > b.c4Since + 1000 && !b.c4Tossed && w->Toss_C4(&b.shootPoint)) {
+              b.c4Tossed = true;
+              b.c4Until = now + 600; // then back to its weapon
+              Say("%s plants C4 at %.1f %.1f %.1f\n", b.name.c_str(), b.shootPoint.X, b.shootPoint.Y, b.shootPoint.Z);
+            }
+          }
     if (now < b.nextStep)
       continue;
     b.nextStep = now + 250;

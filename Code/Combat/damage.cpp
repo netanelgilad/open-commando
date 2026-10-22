@@ -632,6 +632,21 @@ bool DefenseObjectClass::Is_Soft(void) {
 /*
 **
 */
+// The web port's bots record who damaged what (bots_web.cpp; weak, so other
+// builds link without it): the victim, the attacker, how much, whether it
+// was an alternate skin (a building's MCT), and whether it died of it.
+extern "C" __attribute__((weak)) void Rebel_On_Damage(DamageableGameObj *victim, ArmedGameObj *attacker, float dealt,
+                                                       int alternate_skin, bool killed);
+
+static float Do_Damage_Reported(DefenseObjectClass *d, const OffenseObjectClass &offense, float scale, int alternate_skin) {
+  float before = d->Get_Health() + d->Get_Shield_Strength();
+  float result = d->Do_Damage(offense, scale, alternate_skin);
+  float after = d->Get_Health() + d->Get_Shield_Strength();
+  if (Rebel_On_Damage && d->Get_Owner() && before - after > 0.0f)
+    Rebel_On_Damage(d->Get_Owner(), offense.Get_Owner(), before - after, alternate_skin, before > 0.0f && after <= 0.0f);
+  return result;
+}
+
 float DefenseObjectClass::Apply_Damage(const OffenseObjectClass &offense, float scale, int alternate_skin) {
 #if 1
   // If singleplay or non trusted clients, just apply damage normally, if server
@@ -646,7 +661,7 @@ float DefenseObjectClass::Apply_Damage(const OffenseObjectClass &offense, float 
   }
   if (normal) {
     if (CombatManager::I_Am_Server()) {
-      return Do_Damage(offense, scale, alternate_skin);
+      return Do_Damage_Reported(this, offense, scale, alternate_skin);
     } else {
       return Health;
     }
@@ -665,7 +680,7 @@ float DefenseObjectClass::Apply_Damage(const OffenseObjectClass &offense, float 
 
   if (CombatManager::I_Am_Server()) {
     if (my_client || !has_client) {
-      return Do_Damage(offense, scale, alternate_skin);
+      return Do_Damage_Reported(this, offense, scale, alternate_skin);
     } else {
       return Health; // assume we will be notified by the owner Don't apply the damage
     }
@@ -679,7 +694,7 @@ float DefenseObjectClass::Apply_Damage(const OffenseObjectClass &offense, float 
 #else
   // Client Authorative damage is no longer done here.
   if (CombatManager::I_Am_Server()) {
-    return Do_Damage(offense, scale, alternate_skin);
+    return Do_Damage_Reported(this, offense, scale, alternate_skin);
   } else {
     return Health;
   }

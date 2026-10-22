@@ -415,6 +415,43 @@ struct Grid {
       }
   }
 
+  // The grid as JSON for game records (a map under paths and heat maps):
+  // origin, cell size and rows of cells as runs, "<char><count>", where '#'
+  // has no floor, '.' walkable, '~' tiberium, '!' where bots got stuck.
+  bool Map_Json(std::string &j) {
+    if (Building != PHASE_READY)
+      return false;
+    char buf[160];
+    snprintf(buf, sizeof(buf), "{\"minX\":%.1f,\"minY\":%.1f,\"cell\":%.2f,\"nx\":%d,\"ny\":%d,\"rows\":[", Min.X, Min.Y, CELL, NX, NY);
+    j += buf;
+    for (int y = 0; y < NY; y++) {
+      j += y ? ",\"" : "\"";
+      char run = 0;
+      int count = 0;
+      for (int x = 0; x <= NX; x++) {
+        char c = 0;
+        if (x < NX) {
+          c = '#';
+          for (int n = CellStart[y * NX + x]; n < CellStart[y * NX + x + 1]; n++)
+            c = Penalty[n] > 0 ? '!' : Nodes[n].hazard ? (c == '.' ? '.' : '~') : '.';
+        }
+        if (c == run) {
+          count++;
+          continue;
+        }
+        if (count) {
+          j += run;
+          j += std::to_string(count);
+        }
+        run = c;
+        count = 1;
+      }
+      j += '"';
+    }
+    j += "]}";
+    return true;
+  }
+
   bool Dump(const char *file) {
     if (Building != PHASE_READY)
       return false;
@@ -513,5 +550,6 @@ bool Find_Path(Kind k, const Vector3 &from, const Vector3 &to, std::vector<Vecto
 }
 void Block(Kind k, const Vector3 &p, float radius) { For(k).Block(p, radius); }
 bool Dump(Kind k, const char *file) { return For(k).Dump(file); }
+bool Map_Json(Kind k, std::string &out) { return For(k).Map_Json(out); }
 
 } // namespace NavGrid

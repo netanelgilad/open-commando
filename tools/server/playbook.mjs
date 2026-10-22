@@ -31,6 +31,8 @@ What works:
 - Finish what's damaged: the whole team on the one most damaged enemy building beats damage spread over many; a building at half health left alone just stays at half.
 - Tanks in a group with an engineer repairing them beat a defense; a lone tank dies.
 - An APC carries infantry to a building's door; hold the inside, hit the MCT.
+- Engineers (free), Hotwire and Technicians repair buildings and vehicles (fastest at the MCT) and carry C4: one that reaches an enemy MCT plants it there, the surest way to kill a building. A rush of 2-3 C4 carriers with cover, or in an APC, ends buildings.
+- Buy for the job: anti-tank when their tanks come, C4 carriers or artillery for buildings, an engineer when ours are hit.
 - Long-range units (artillery, rocket launchers) can hit buildings from outside the defense's reach; guard them.
 - Kill the enemy harvester for cheap: their income stops while it's gone.
 - When a building of yours is under attack: kill the attackers first, then repair (engineers).

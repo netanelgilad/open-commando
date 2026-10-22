@@ -504,6 +504,17 @@ void BuildingGameObj::Apply_Damage(const OffenseObjectClass &damager, float scal
   Update_State();
 }
 
+bool BuildingGameObj::Get_MCT_Position(Vector3 &pos) {
+  RefMultiListIterator<BuildingAggregateClass> it(&Aggregates);
+  for (it.First(); !it.Is_Done(); it.Next())
+    if (it.Peek_Obj()->Is_MCT()) {
+      // The middle of its model (the transform's origin can be at the floor).
+      pos = it.Peek_Obj()->Peek_Model() ? it.Peek_Obj()->Peek_Model()->Get_Bounding_Box().Center : it.Peek_Obj()->Get_Transform().Get_Translation();
+      return true;
+    }
+  return false;
+}
+
 void BuildingGameObj::Apply_Damage_Building(const OffenseObjectClass &offense, StaticPhysClass *component) {
   /*
   ** If the MCT is being damaged, use an alternate skin type

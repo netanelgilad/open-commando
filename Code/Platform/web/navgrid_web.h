@@ -7,6 +7,8 @@
 #include "vector3.h"
 #include <vector>
 
+#include <string>
+
 namespace NavGrid {
 enum Kind { SOLDIER, VEHICLE };
 // Builds the grids for the current level, a slice per call (call it every
@@ -19,6 +21,7 @@ bool Find_Path(Kind kind, const Vector3 &from, const Vector3 &to, std::vector<Ve
 void Block(Kind kind, const Vector3 &p, float radius);
 // Writes a grid as a PGM image (top view, brighter = more links).
 bool Dump(Kind kind, const char *file);
+bool Map_Json(Kind kind, std::string &out); // the grid for game records (see navgrid_web.cpp)
 int Node_Count(Kind kind);
 // Standing on tiberium (it hurts soldiers)?
 bool On_Tiberium(const Vector3 &p);

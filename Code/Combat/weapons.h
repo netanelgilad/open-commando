@@ -237,6 +237,11 @@ public:
   void Set_Safety(bool saftey) { SafetySet = saftey; }
   bool Is_Safety_Set(void) { return SafetySet; }
   void Set_Primary_Triggered(bool triggered);
+  // Throws C4 now, as the fire path does for a C4 weapon (a round, the toss
+  // from the muzzle); for the web port's bots. False if this isn't C4 or none left.
+  // With a target, the toss starts just short of it, aimed at it (an AI
+  // soldier's muzzle isn't aimed: its C4 stuck to whatever was beside it).
+  bool Toss_C4(const Vector3 *target = NULL);
   void Set_Secondary_Triggered(bool triggered);
   bool Is_Triggered(void) { return IsSecondaryTriggered || IsPrimaryTriggered; }
 
