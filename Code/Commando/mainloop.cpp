@@ -84,9 +84,15 @@ void _Game_Main_Loop_Loop(void) {
 
   unsigned long time1 = TIMEGETTIME();
 
-  TimeManager::Update();
+  {
+    WWPROFILE("Time Update");
+    TimeManager::Update();
+  }
 
-  Input::Update();
+  {
+    WWPROFILE("Input Update");
+    Input::Update();
+  }
 
   {
     WWPROFILE("Pathfind Evaluate");
@@ -139,11 +145,13 @@ void _Game_Main_Loop_Loop(void) {
   WWASSERT(GameModeManager::Find("Combat") != NULL);
 
   if (!GameModeManager::Find("Combat")->Is_Active()) {
+    WWPROFILE("Network Update");
     cNetwork::Update();
   }
 
   // Denzil - Embedded browser
   if (WebBrowser::IsWebPageDisplayed() == false) {
+    WWPROFILE("Render");
     GameModeManager::Render();
   }
 
@@ -167,7 +175,10 @@ void _Game_Main_Loop_Loop(void) {
   // Give the sound manager a chance to think
   // PROFILE(	"Audio", WWAudioClass::Get_Instance ()->On_Frame_Update (0) );
 
-  Windows_Message_Handler();
+  {
+    WWPROFILE("Message Handler");
+    Windows_Message_Handler();
+  }
 #ifdef WWDEBUG
   // Sometimes it is useful to be able to artificially lower the frame rate
   Sleep(cDevOptions::DesiredFrameSleepMs.Get());
@@ -183,7 +194,10 @@ void _Game_Main_Loop_Loop(void) {
 }
 #endif
 
-  DebugManager::Update();
+  {
+    WWPROFILE("Debug Update");
+    DebugManager::Update();
+  }
 
   /*
   ** Sleep for a while if we are hogging the CPU.

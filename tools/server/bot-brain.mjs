@@ -1015,7 +1015,8 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const defense = defensesOf(b.team).length > 0;
     // Long enough a weapon to hit it from outside the defense: no rally.
     if (defense && !bb?.c4 && siegeSpot(me, b, rangeOf(me))) return null;
-    const need = defensesOf(b.team).some((x) => dist(x.pos, b.pos) < DEFENSE_REACH_M) ? RALLY_NEED_DEFENDED : RALLY_NEED;
+    const defended = defensesOf(b.team).some((x) => dist(x.pos, b.pos) < DEFENSE_REACH_M);
+    const need = me.vehicle ? (defended ? 3 : 2) : defended ? RALLY_NEED_DEFENDED : RALLY_NEED;
     const home = places.find((p) => p.base && p.team === me.team)?.pos;
     if (!defense || !home || !bb) return null;
     const r = ((bb.rally ??= {})[plan.id] ??= {});
@@ -1023,16 +1024,22 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     // A push on this building is on: no waiting, join it.
     const push = teamPush[me.team];
     if (push && push.building === b.id && Date.now() - push.at < PUSH_MS) return (r.go = true), null;
-    const at = home.map((v, i) => v + RALLY_SHARE * (b.pos[i] - v));
-    const name = `the rally point for the enemy ${buildingName(b)}`;
-    if (dist(me.pos, b.pos) < dist(at, b.pos) - 10) return (r.go = true), null; // already past it
-    if (dist(me.pos, at) > 15) return { name, pos: at, rally: true, distance: dist(me.pos, at) };
+    // Vehicles gather at home (a point between the bases may be infantry
+    // ground: in a game, every vehicle looped in its own base and the south
+    // field, never reaching the enemy), and go as a convoy.
+    const convoy = !!me.vehicle;
+    const at = convoy ? home : home.map((v, i) => v + RALLY_SHARE * (b.pos[i] - v));
+    const name = convoy ? `the vehicle rally at our base for the enemy ${buildingName(b)}` : `the rally point for the enemy ${buildingName(b)}`;
+    if (!convoy && dist(me.pos, b.pos) < dist(at, b.pos) - 10) return (r.go = true), null; // already past it
+    if (dist(me.pos, at) > (convoy ? 45 : 15)) return { name, pos: at, rally: true, distance: dist(me.pos, at) };
     const now = Date.now();
     if (!r.since) {
       r.since = now;
       bb.rallySay = `Gathering for a push on the ${buildingName(b)}, join me`;
     }
-    const here = world.players.filter((p) => p.alive && p.team === me.team && dist(p.pos, me.pos) < 25).length;
+    const here = convoy
+      ? world.vehicles.filter((v) => v.team === me.team && v.driver && v.hp > 0 && dist(v.pos, me.pos) < 40).length
+      : world.players.filter((p) => p.alive && p.team === me.team && dist(p.pos, me.pos) < 25).length;
     const waited = now - r.since;
     if (here >= need || (waited > RALLY_PATIENCE_MS[0] && here >= Math.ceil(need / 2)) || waited > RALLY_PATIENCE_MS[1]) {
       r.go = true;
