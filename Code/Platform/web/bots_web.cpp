@@ -115,6 +115,7 @@ struct Bot {
 
 std::vector<Bot> Bots;
 const char *Weapon_Kind(WeaponClass *w);
+void Leave_Vehicle(SoldierGameObj *s);
 bool Brain = false;      // bot_brain on: an outside brain decides (bot_do), see below
 double NextState = 0;
 int Fill = 0;            // bot_fill: keep this many players in the game
@@ -331,7 +332,7 @@ void Step_Bot(Bot &b, SoldierGameObj *s, const Vector3 &me, double now) {
       if (s->Get_Vehicle() && b.stuckRow >= 4) {
         // A vehicle that can't get on (the walking grid is made for soldiers):
         // out, and on foot.
-        s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
+        Leave_Vehicle(s);
         b.stuckRow = 0;
         Say("%s leaves a stuck vehicle\n", b.name.c_str());
       }
@@ -690,6 +691,18 @@ int Weapon_Index_Of(SoldierGameObj *s, const char *kind) {
     if (bag->Peek_Weapon(i) && !strcmp(Weapon_Kind(bag->Peek_Weapon(i)), kind) && bag->Peek_Weapon(i)->Get_Total_Rounds() != 0)
       return i;
   return -1;
+}
+
+// Out of its vehicle, now, beside it. (The "use" control for it is cleared
+// each frame by the vehicle's action, so a stuck driver set it and stayed.)
+void Leave_Vehicle(SoldierGameObj *s) {
+  VehicleGameObj *v = s ? s->Get_Vehicle() : nullptr;
+  if (!v)
+    return;
+  Matrix3D tm = v->Get_Transform();
+  v->Remove_Occupant(s);
+  Vector3 at = tm.Get_Translation() + tm.Get_Y_Vector() * 3.5f + Vector3(0, 0, 0.5f);
+  s->Set_Position(at);
 }
 
 // As the purchase menu: aircraft only on maps made for them.
@@ -1314,7 +1327,7 @@ public:
         b.waitUntil = now + 2000;
         Order(b, s, &me);
       } else if (strstr(rest, "get_out") && vehicle) {
-        s->Set_Boolean_Control(ControlClass::BOOLEAN_ACTION);
+        Leave_Vehicle(s);
       }
     } else if (!strcmp(verb, "leave_tiberium") && s) {
       // Out of the field by the shortest way, then on with the plan.

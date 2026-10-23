@@ -146,6 +146,18 @@ if (which === 'vehicle' || which === 'all') {
   }
 }
 
+if (which === 'exit' || which === 'all') {
+  // A bot gets in a tank and out again on command.
+  const id = await addBot('gdi');
+  await sleep(2000);
+  const v = /spawned \S+ as (\d+)/.exec(await ask(`bot_do ${id} spawn CnC_GDI_Medium_Tank`, 1500))?.[1];
+  await ask(`bot_do ${id} enter ${v}`, 3000);
+  const inside = /driving/.test((await ask('bot_list', 800)));
+  await ask(`bot_do ${id} maneuver get_out`, 2000);
+  const outside = !/driving/.test((await ask('bot_list', 800)));
+  results.push(`exit a vehicle: ${inside && outside ? 'PASS' : 'FAIL'} (in: ${inside}, out after get_out: ${outside})`);
+}
+
 if (which === 'repair' || which === 'all') {
   // A damaged GDI building and a GDI engineer type (Hotwire) by its MCT
   // repairing it: health goes up.
