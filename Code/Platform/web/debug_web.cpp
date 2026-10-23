@@ -15,9 +15,38 @@ extern "C" void Rebel_Debug_Dump(void) { PendingDump = true; } // queued, see Re
 // stdin lines here. Queued like the other hooks.
 #include "consolefunction.h"
 #include <string>
+#include <cstring>
+#include <cstdlib>
 #include <vector>
 static std::vector<std::string> PendingConsole;
 extern "C" void Rebel_Console_Command(const char *line) { PendingConsole.push_back(line); }
+
+// Lines a host queued in JavaScript (Module.rebelConsoleQueue, an array):
+// taken from here, inside the game's own frame. Calling into the game from
+// JavaScript instead (ccall) can land while it's suspended in a sleep
+// (Asyncify) and corrupt it: the dedicated server hung in "Server Sleep".
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+EM_JS_DEPS(rebel_console_queue, "$stringToNewUTF8");
+EM_JS(char *, Rebel_Take_Console_Queue, (void), {
+  var q = Module.rebelConsoleQueue;
+  if (!q || !q.length) return 0;
+  var text = q.join('\n');
+  q.length = 0;
+  return stringToNewUTF8(text);
+});
+#endif
+static void Take_Console_Queue() {
+#ifdef __EMSCRIPTEN__
+  char *text = Rebel_Take_Console_Queue();
+  if (!text)
+    return;
+  for (char *line = strtok(text, "\n"); line; line = strtok(nullptr, "\n"))
+    if (*line)
+      PendingConsole.push_back(line);
+  free(text);
+#endif
+}
 static void Dump_Modes(void) {
   static const char *names[] = {"Combat", "Console", "LAN", "Menu", "Movie", "Overlay", "ScoreScreen", "TextDisplay", "WOL"};
   fprintf(stderr, "[debug] game modes:");
@@ -103,6 +132,9 @@ extern "C" unsigned Rebel_Frame_Count(void) { return FrameCount; }
 
 extern "C" void Rebel_Run_Pending_Actions(void) {
   FrameCount++;
+  // Published for hosts to read without calling in (see Take_Console_Queue).
+  if (FrameCount % 30 == 0)
+    EM_ASM({ Module.rebelFrames = $0; }, FrameCount);
   Rebel_Showroom_Run_Pending();
   // A level loading pumps messages too (Load_Level -> Windows_Message_Handler),
   // with the old level half released: the bots (their state reads every
@@ -110,6 +142,7 @@ extern "C" void Rebel_Run_Pending_Actions(void) {
   // done. Reading a base mid-load crashed the server at each map change.
   if (g_is_loading)
     return;
+  Take_Console_Queue();
   Rebel_Bots_Think();
   if (!PendingConsole.empty()) {
     std::vector<std::string> lines;

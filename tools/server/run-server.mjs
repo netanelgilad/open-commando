@@ -154,7 +154,11 @@ const state = { ready: false, map: null, loaded: false, warmup: false, players: 
 let gameModule = null; // the game's Module once running
 let brain = null; // the bots' brain, if on (see below)
 let recorder = { add() {}, flush: async () => {} }; // the game's record, see below
-const console_ = (line) => gameModule && gameModule.ccall('Rebel_Console_Command', null, ['string'], [line]);
+// Console lines are queued here and taken by the game inside its own frame
+// (debug_web.cpp Take_Console_Queue): a ccall could land while the game is
+// suspended in a sleep (Asyncify) and corrupt it; the server hung in
+// "Server Sleep" with the bots' commands arriving all the time.
+const console_ = (line) => gameModule && (gameModule.rebelConsoleQueue ??= []).push(line);
 const out = (t) => {
   const line = `${stamp()} ${t}`;
   console.log(line);
@@ -262,7 +266,7 @@ setInterval(() => {
 }, 50).unref();
 setInterval(() => {
   const m = process.memoryUsage();
-  const frames = gameModule?._Rebel_Frame_Count ? gameModule._Rebel_Frame_Count() : 0;
+  const frames = gameModule?.rebelFrames || 0; // published by the game (no call into it)
   const now = Date.now();
   perf.fps = Math.round(((frames - perf.frames) * 1000) / (now - perf.at));
   const cpu = process.cpuUsage();
