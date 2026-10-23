@@ -864,12 +864,22 @@ void Emit_State(double now) {
     Facts_Json(j);
   }
   // The walking grid, once it's built (game records draw the map from it).
-  static StringClass grid_map;
+  static StringClass grid_map, vgrid_map;
   if (grid_map != The_Game()->Get_Map_Name()) {
     std::string grid;
     if (NavGrid::Map_Json(NavGrid::SOLDIER, grid)) {
       grid_map = The_Game()->Get_Map_Name();
       j += ",\"grid\":";
+      j += grid;
+    }
+  }
+  // The vehicles' grid too (stricter: a tank's width): where a vehicle can
+  // be, for its firing positions.
+  if (vgrid_map != The_Game()->Get_Map_Name()) {
+    std::string grid;
+    if (NavGrid::Map_Json(NavGrid::VEHICLE, grid)) {
+      vgrid_map = The_Game()->Get_Map_Name();
+      j += ",\"vgrid\":";
       j += grid;
     }
   }

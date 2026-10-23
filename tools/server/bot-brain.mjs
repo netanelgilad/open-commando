@@ -953,20 +953,22 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   // A team's open push (a rally that went): others join it (see rallyFor).
   const teamPush = {}; // team -> { building, at, by }
   // The map's walking grid (bots_web.cpp sends it once a map): walkable cells.
-  let grid = null;
-  function setGrid(g) {
+  let grid = null, vgrid = null; // soldiers' and vehicles' (bots_web.cpp)
+  function decodeGrid(g) {
     const cells = new Uint8Array(g.nx * g.ny);
     g.rows.forEach((row, y) => {
       let x = 0;
-      for (const m of row.matchAll(/([#.~!])(\d+)/g)) for (let k = 0; k < +m[2]; k++, x++) cells[y * g.nx + x] = m[1] === '.' || m[1] === '!' ? 1 : 0;
+      for (const m of row.matchAll(/([#.~!])(\d+)/g)) for (let k = 0; k < +m[2]; k++, x++) cells[y * g.nx + x] = m[1] === '#' ? 0 : 1;
     });
-    grid = { ...g, cells };
+    return { ...g, rows: undefined, cells };
   }
-  const walkable = (p) => {
-    if (!grid) return true;
-    const x = Math.floor((p[0] - grid.minX) / grid.cell), y = Math.floor((p[1] - grid.minY) / grid.cell);
-    return x >= 0 && y >= 0 && x < grid.nx && y < grid.ny && grid.cells[y * grid.nx + x] === 1;
+  const onGrid = (g, p) => {
+    if (!g) return true;
+    const x = Math.floor((p[0] - g.minX) / g.cell), y = Math.floor((p[1] - g.minY) / g.cell);
+    return x >= 0 && y >= 0 && x < g.nx && y < g.ny && g.cells[y * g.nx + x] === 1;
   };
+  const walkable = (p) => onGrid(grid, p);
+  const drivable = (p) => onGrid(vgrid, p);
   const hasWeapon = (bot, kinds) => (bot?.weapons || []).some(([k, n]) => kinds.includes(k) && n !== 0);
   // Live enemy base defenses of a team (Obelisk, Guard Tower).
   const defensesOf = (team) => world.buildings.filter((x) => x.team === team && x.hp > 0 && /obelisk|guard_tower|agt/i.test(x.name));
@@ -984,7 +986,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     for (let r = SIEGE_NEAR_M; r <= Math.min(SIEGE_FAR_M, range); r += 5)
       for (let a = 0; a < 360; a += 15) {
         const at = [b.pos[0] + r * Math.cos((a * Math.PI) / 180), b.pos[1] + r * Math.sin((a * Math.PI) / 180), b.pos[2]];
-        if (!walkable(at) || !defenses.every((x) => dist(at, x.pos) >= SIEGE_KEEP_OUT_M)) continue;
+        if (!(me.vehicle ? drivable(at) : walkable(at)) || !defenses.every((x) => dist(at, x.pos) >= SIEGE_KEEP_OUT_M)) continue;
         if (!best || dist(me.pos, at) < dist(me.pos, best)) best = at;
       }
     return best;
@@ -1012,7 +1014,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
   // after a while, so a quiet team doesn't stall.
   const RALLY_SHARE = 0.55; // of the way from our base to the target
   const RALLY_NEED = 3; // bots there, this one included
-  const RALLY_PATIENCE_MS = [40000, 75000]; // then 2 will do; then go anyway
+  const RALLY_PATIENCE_MS = [60000, 90000]; // then one short will do; then go anyway
   function rallyFor(plan, me, bb, b) {
     const defense = defensesOf(b.team).length > 0;
     // Long enough a weapon to hit it from outside the defense: no rally.
@@ -1043,7 +1045,8 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       ? world.vehicles.filter((v) => v.team === me.team && v.driver && v.hp > 0 && dist(v.pos, me.pos) < 40).length
       : world.players.filter((p) => p.alive && p.team === me.team && dist(p.pos, me.pos) < 25).length;
     const waited = now - r.since;
-    if (here >= need || (waited > RALLY_PATIENCE_MS[0] && here >= Math.ceil(need / 2)) || waited > RALLY_PATIENCE_MS[1]) {
+    // (Pushes into the Obelisk went with 4 on average and died at the door.)
+    if (here >= need || (waited > RALLY_PATIENCE_MS[0] && here >= need - 1) || waited > RALLY_PATIENCE_MS[1]) {
       r.go = true;
       if (here >= 2 && !(teamPush[me.team] && Date.now() - teamPush[me.team].at < PUSH_MS)) {
         teamPush[me.team] = { building: b.id, at: Date.now(), by: me.name };
@@ -1076,6 +1079,19 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
         // A long enough weapon: fire from outside the defense (a siege).
         const spot = siegeSpot(me, b, rangeOf(me));
         if (spot) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: spot, building: b.id, enemy: true, siege: true, distance: dist(me.pos, spot) };
+        // A vehicle (no spot outside the defense): the nearest place it can
+        // drive to within 20-40 m of the building. (A building's middle
+        // isn't drivable: paths ended 45-80 m out, out of firing range,
+        // and in a game drivers came within 45 m of a target 11 times.)
+        if (me.vehicle && vgrid) {
+          let best = null;
+          for (let r = 20; r <= 40; r += 5)
+            for (let a = 0; a < 360; a += 15) {
+              const at = [b.pos[0] + r * Math.cos((a * Math.PI) / 180), b.pos[1] + r * Math.sin((a * Math.PI) / 180), b.pos[2]];
+              if (drivable(at) && (!best || dist(me.pos, at) < dist(me.pos, best))) best = at;
+            }
+          if (best) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: best, building: b.id, enemy: true, siege: true, distance: dist(me.pos, best) };
+        }
         // A vehicle with no defense to fear: about half its range away.
         if (me.vehicle && !defensesOf(b.team).length) {
           const standoff = Math.min(60, Math.max(15, rangeOf(me) * 0.45));
@@ -1504,7 +1520,8 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
         return;
       }
       world = next;
-      if (world.grid) setGrid(world.grid);
+      if (world.grid) grid = decodeGrid(world.grid);
+      if (world.vgrid) vgrid = decodeGrid(world.vgrid);
       if (world.facts) {
         facts = world.facts; // the weapons' numbers on this map, sent once
         playbookCache.clear();
