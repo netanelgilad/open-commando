@@ -31,6 +31,7 @@ const FOCUS_BELOW = 0.8; // an enemy building under this health is everyone's ta
 // Tactics at a building (bots_web.cpp gives MCT positions and each bot's weapons):
 const MCT_AIM_M = 25; // closer than this to an MCT, shoot it (damage there counts ~2x)
 const C4_PLANT_M = 4; // C4 goes on the MCT from this close
+const C4_RUSH_M = 35; // closer than this to its target building, a bot with C4 goes in for the MCT
 const REPAIR_BELOW = 0.95; // a friendly building under this health wants an engineer
 const REPAIR_NEAR_M = 60; // ... within this far
 const REPAIR_GUN_M = 7; // the repair gun's reach (its ammo range is ~10-15 m)
@@ -44,6 +45,7 @@ const SIEGE_KEEP_OUT_M = DEFENSE_REACH_M + 5;
 // came from 23-62 m (median 33); a tank in a test hit from 40 m and didn't
 // fire at all from 60. Siege positions are this close to the target.
 const SIEGE_NEAR_M = 25, SIEGE_FAR_M = 40;
+const BUILDING_FIRE_M = 45; // within this of its target building, a bot fires at it
 const RALLY_NEED_DEFENDED = 6; // into a defense's reach: enough to overwhelm it (the Obelisk needs ~3.3 s a kill)
 const STUCK_VEHICLE_MS = 30000; // a driver that moved < 8 m in this long with somewhere to go gets out
 
@@ -1068,7 +1070,9 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       if (b && b.team !== me.team) {
         // C4 on board: to the MCT inside. A vehicle: a firing position at
         // about half its weapon's range, on our side of the building.
-        if (bb?.c4 && b.mct && !me.vehicle) return { name: `the enemy ${buildingName(b)}'s MCT`, pos: b.mct, building: b.id, enemy: true, mct: true, distance: dist(me.pos, b.mct) };
+        // Engineer types go for the MCT from anywhere; anyone else with C4
+        // once close (35 m): in, to plant it (how players kill buildings).
+        if ((bb?.c4 || (bb?.hasC4 && dist(me.pos, b.pos) < C4_RUSH_M)) && b.mct && !me.vehicle) return { name: `the enemy ${buildingName(b)}'s MCT`, pos: b.mct, building: b.id, enemy: true, mct: true, distance: dist(me.pos, b.mct) };
         // A long enough weapon: fire from outside the defense (a siege).
         const spot = siegeSpot(me, b, rangeOf(me));
         if (spot) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: spot, building: b.id, enemy: true, siege: true, distance: dist(me.pos, spot) };
@@ -1177,8 +1181,13 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     }
     // At its firing position: shell the building (no close enemy chosen).
     const sieging = objective?.siege && objBld && dist(me.pos, objective.pos) < 12 && !t.startsWith('enemy_');
+    // Its target building in reach (where hits land, <45 m) and no enemy in
+    // its face: fire at the building. (Left to the decider, drivers within
+    // 45 m of their target most of a game shot at it twice.)
+    const enemyInFace = state.enemies_in_sight.some((e) => e.distance < 20);
+    const atTarget = objBld && dist(me.pos, objBld.pos) < BUILDING_FIRE_M && !enemyInFace;
     if (bld) cmd('fire', `shoot ${aimAt(bld)}`);
-    else if (sieging) cmd('fire', `shoot ${xyz(objBld.pos, 2)}`);
+    else if (sieging || atTarget) cmd('fire', `shoot ${aimAt(objBld)}`);
     else if (t.startsWith('enemy_')) cmd('fire', `target ${t.slice(6)}`);
     else if (t === 'building' && objBld) cmd('fire', `shoot ${aimAt(objBld)}`);
     else if (t === 'building' && objective) cmd('fire', `shoot ${xyz(objective.pos, 2)}`);
