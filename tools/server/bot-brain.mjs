@@ -1023,7 +1023,10 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     const need = me.vehicle ? (defended ? 3 : 2) : defended ? RALLY_NEED_DEFENDED : RALLY_NEED;
     const home = places.find((p) => p.base && p.team === me.team)?.pos;
     if (!defense || !home || !bb) return null;
-    const r = ((bb.rally ??= {})[plan.id] ??= {});
+    // Per target building, not per plan: a driver switching between plans on
+    // the same building (push, join the push) went back home to rally each
+    // time (53% of its orders pointed home).
+    const r = ((bb.rally ??= {})[b.id] ??= {});
     if (r.go) return null;
     // A push on this building is on: no waiting, join it.
     const push = teamPush[me.team];
@@ -1077,7 +1080,13 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
         // once close (35 m): in, to plant it (how players kill buildings).
         if ((bb?.c4 || (bb?.hasC4 && dist(me.pos, b.pos) < C4_RUSH_M)) && b.mct && !me.vehicle) return { name: `the enemy ${buildingName(b)}'s MCT`, pos: b.mct, building: b.id, enemy: true, mct: true, distance: dist(me.pos, b.mct) };
         // A long enough weapon: fire from outside the defense (a siege).
-        const spot = siegeSpot(me, b, rangeOf(me));
+        // A spot, once chosen, stays until the building falls or the bot
+        // dies (the nearest spot moves as the bot does: 686 of 715 orders to
+        // a firing spot were replaced before the vehicle got within 30 m).
+        const kept = bb?.spots?.[b.id];
+        if (kept && kept.vehicle === !!me.vehicle) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: kept.pos, building: b.id, enemy: true, siege: true, distance: dist(me.pos, kept.pos) };
+        const keep = (pos) => (bb && ((bb.spots ??= {})[b.id] = { pos, vehicle: !!me.vehicle }), pos);
+        const spot = siegeSpot(me, b, rangeOf(me)) && keep(siegeSpot(me, b, rangeOf(me)));
         if (spot) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: spot, building: b.id, enemy: true, siege: true, distance: dist(me.pos, spot) };
         // A vehicle (no spot outside the defense): the nearest place it can
         // drive to within 20-40 m of the building. (A building's middle
@@ -1090,7 +1099,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
               const at = [b.pos[0] + r * Math.cos((a * Math.PI) / 180), b.pos[1] + r * Math.sin((a * Math.PI) / 180), b.pos[2]];
               if (drivable(at) && (!best || dist(me.pos, at) < dist(me.pos, best))) best = at;
             }
-          if (best) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: best, building: b.id, enemy: true, siege: true, distance: dist(me.pos, best) };
+          if (best) return { name: `a firing position on the enemy ${buildingName(b)}`, pos: keep(best), building: b.id, enemy: true, siege: true, distance: dist(me.pos, best) };
         }
         // A vehicle with no defense to fear: about half its range away.
         if (me.vehicle && !defensesOf(b.team).length) {
@@ -1349,6 +1358,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
       bb.notes = [];
       bb.orders = [];
       bb.rally = {};
+      bb.spots = {};
       bb.saveFor = null;
       bb.lastDecided = null;
       bb.quietKey = null;
@@ -1413,6 +1423,7 @@ export function createBrain({ mode = 'scripted', send: sendCommand, record: rec 
     if (!wasAlive) {
       bb.why = 'you just (re)spawned';
       bb.rally = {}; // a new life gathers again
+      bb.spots = {};
     }
     const routine = wasAlive && !bb.wantPlan && !bb.why;
     if ((!wasAlive || bb.wantPlan || now >= bb.nextPlan) && !bb.planning) {

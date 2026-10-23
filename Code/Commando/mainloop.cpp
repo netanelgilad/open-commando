@@ -156,6 +156,7 @@ void _Game_Main_Loop_Loop(void) {
   }
 
   if (AutoRestart.Is_Active()) {
+    WWPROFILE("Auto Restart");
     AutoRestart.Think();
   }
 
@@ -211,6 +212,7 @@ void _Game_Main_Loop_Loop(void) {
       */
       unsigned long diff = time2 - time1;
       if (diff < 16) {
+        WWPROFILE("Server Sleep");
         unsigned long sleep_time = 16 - (time2 - time1);
         Sleep(sleep_time);
       }
